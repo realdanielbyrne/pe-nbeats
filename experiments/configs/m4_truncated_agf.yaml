@@ -1,0 +1,126 @@
+# ============================================================
+# M4-Hourly — the agf companion at TRUNCATED forecast rank
+#
+# WHY THIS IS ADDITIVE RATHER THAN A REPLACEMENT. The existing truncated-rank
+# arms (m4_truncated_identity, m4_kl_basis, m4_ordered_wavelet) all run at
+# active_g=false, and they have to: they are compared against each other and
+# against the identity control, which is pinned at ag0 because the completeness
+# test requires it. Switching those studies to agf would destroy the very
+# comparisons they exist to make. So agf is added as a parallel condition, giving
+# a full 4 bases x 2 activation settings factorial at d_f = 16 of 48.
+#
+# WHAT IT TESTS. active_g applies its activation AFTER the frozen basis, so it
+# cannot change what a complete basis can represent, but it visibly changes what
+# training finds: on Hourly it is worth -0.23 to -0.37 sMAPE on frozen basis arms
+# against -0.04 to -0.15 on the baselines, preferred in 9 of 9 matched stems. The
+# open question is whether that help is uniform across bases or whether it
+# preferentially rescues the arms that are struggling.
+#
+# ag0 references to compare against, ten seeds each:
+#   KL 10.054 | DCT 10.287 | band-ordered db3 10.580 | SVD db3 73.946
+#
+# PREDICTION, REGISTERED BEFORE TRAINING. agf shifts every arm down by a similar
+# small amount and does NOT reorder them, because the ordering is set by captured
+# energy, which agf does not touch. A large reordering would mean the capture law
+# is contingent on the activation and would need saying so in the paper.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_truncated_agf.yaml
+# ============================================================
+
+experiment_name: m4_truncated_agf
+category: basis_identity
+description: >
+  M4-Hourly at forecast rank 16 of 48 with a band-ordering-preserving wavelet
+  basis, parameter-identical to the SVD-ordered and DCT arms already measured.
+  Isolates how much of the wavelet's poor showing at truncated rank was caused by
+  the orthogonalisation destroying its dyadic ordering.
+
+dataset: m4
+periods:
+  - Hourly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Hourly: 10
+
+training:
+  active_g: forecast
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5       # L = 240
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  g_width: 256
+  basis_dim: eq_fcast          # backcast pinned at 48 x 240, as in every arm
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42                # identical seeds to the arms being compared
+
+extra_csv_columns:
+  - forecast_basis_dim_cfg
+  - basis_kind
+  - basis_ordering
+  - predicted_capture
+  - band_boundary
+
+configs:
+  - name: W_10s_fbd16_db3_agf
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 16, wavelet_type: "db3"}
+    extra_fields: {forecast_basis_dim_cfg: 16, basis_kind: db3, basis_ordering: svd, predicted_capture: 0.347765, band_boundary: n_a}
+
+  - name: W_10s_fbd16_dct_agf
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 16, wavelet_type: "dct"}
+    extra_fields: {forecast_basis_dim_cfg: 16, basis_kind: dct, basis_ordering: frequency, predicted_capture: 0.999964, band_boundary: n_a}
+
+  - name: W_10s_fbd16_kl_agf
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 16, wavelet_type: "kl:experiments/bases/m4_hourly"}
+    extra_fields: {forecast_basis_dim_cfg: 16, basis_kind: kl, basis_ordering: energy, predicted_capture: 0.999981, band_boundary: n_a}
+
+  - name: W_10s_fbd16_db3ordered_agf
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 16, wavelet_type: "ordered:db3"}
+    extra_fields: {forecast_basis_dim_cfg: 16, basis_kind: db3_ordered, basis_ordering: band, predicted_capture: 0.999885, band_boundary: past}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_truncated_agf_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
