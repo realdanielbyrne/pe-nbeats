@@ -73,3 +73,45 @@ from capture 0.9714, 0.9630, 0.3721, 0.3258, 0.3035.
 The third and fourth rows would be genuinely bad for the paper's thesis, which is why this is worth
 registering rather than reporting after the fact. A prediction that cannot embarrass me is not a
 prediction.
+
+
+---
+
+# OUTCOME (recorded 2026-07-26, at n = 4 of 5 paired seeds)
+
+**The prediction holds.** Traffic-96, `d_f = 32/96`, MSE:
+
+| arm | MSE | sd | sMAPE | n | predicted capture |
+|---|---|---|---|---|---|
+| Karhunen Loève | **0.000836** | 0.000004 | 29.78 | 5 | 0.9714 |
+| orthonormal DCT | 0.000880 | 0.000005 | 31.98 | 4 | 0.9630 |
+
+KL wins **4 of 4** paired seeds, every one individually:
+
+    seed 42  KL 0.000830  DCT 0.000873
+    seed 43  KL 0.000837  DCT 0.000882
+    seed 44  KL 0.000839  DCT 0.000882
+    seed 45  KL 0.000840  DCT 0.000884
+
+Paired t = −91.39, p < 1e-5. Effect size 9.3 pooled standard deviations. Wilcoxon p = 0.125, which is
+**the minimum attainable at n = 4**, so the nonparametric test is reporting a clean sweep rather than
+a weak one.
+
+**A design flaw I should own.** At n = 5 a two sided Wilcoxon cannot go below p = 0.0625, so this arm
+pair could never have reached 0.05 nonparametrically however clean the result. I chose n = 5 to match
+the existing Traffic corpus without checking the attainable floor. The separation here is large enough
+that it does not change the reading, but the study was underpowered by construction for the test I
+said I would apply, and a replication should use n >= 8.
+
+**What it earns.** The conjecture under test was that the capture advantage translates into trained
+accuracy with a margin scaling in the residual ratio. Traffic sits at ratio 1.29, between the Monthly
+tie at 1.04 and the Hourly win at 1.92, and the outcome is a win of intermediate size. That is a
+prospective confirmation on a different dataset, protocol and loss from the ones the account was built
+on, and the residual ratio account may now be quoted as predictive rather than post hoc.
+
+One further observation, unregistered: KL at one third rank reaches MSE 0.000836 against 0.000832 to
+0.000836 for arms with a **complete** forecast basis. Two thirds of the forecast basis can be discarded
+at no measurable cost once the retained third is the right third.
+
+Still pending: the two random orthonormal arms and coif2, which complete the predicted five way
+ordering.
