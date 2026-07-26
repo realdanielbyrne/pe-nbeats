@@ -231,3 +231,9 @@ SAMPLING_STYLE_PLAN.md
 
 .venv-cpu/Scripts/python.exe
 .venv-old/Scripts/python.exe
+
+# Peer review material is confidential until decisions release, and this
+# remote is public. The whole folder stays local: reviewer PDFs, the parsed
+# review roadmap, and the unposted rebuttal drafts. Files stay on disk, they
+# just never get committed. Un-ignore once decisions are public.
+NBEATS-Explorations/rebuttal/
