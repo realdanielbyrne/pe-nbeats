@@ -68,7 +68,7 @@ there, and that is exactly where it breaks.
 **Registered prediction FAILED.** I predicted the null would hold equally with no activation and with
 activation after the basis. It holds beautifully in the second case and fails in the first, entirely
 because of an ag0 plus DCT optimisation pathology. The null is therefore an
-activation-after-basis result; under pure linear synthesis it holds for three bases of four.
+activation after basis result; under pure linear synthesis it holds for three bases of four.
 
 ### The DCT pathology, and why it is not a counterexample
 
