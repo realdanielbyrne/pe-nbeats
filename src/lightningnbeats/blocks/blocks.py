@@ -2635,7 +2635,9 @@ class _WaveletGeneratorV3(nn.Module):
         self.basis = nn.Parameter(basis, requires_grad=False)
 
     @staticmethod
-    def _build_control_basis(target_length, kind, basis_dim=None, basis_offset=0):
+    def _build_control_basis(
+        target_length, kind, basis_dim=None, basis_offset=0, max_decomp_level=5
+    ):
         """Non-wavelet orthonormal control bases.
 
         Used to test whether the benefit of the frozen basis is wavelet-specific or a
@@ -2657,6 +2659,59 @@ class _WaveletGeneratorV3(nn.Module):
           linear approximation in the technical sense, since the rows are fixed
           before training and shared by every series.
         """
+        if kind.startswith("ordered:"):
+            # Band-ordering-preserving orthonormalisation of a DWT synthesis basis.
+            #
+            # The default path SVDs the raw basis and keeps rows by singular value,
+            # which mixes every wavelet function together and destroys the dyadic
+            # level ordering. Truncating it therefore keeps an arbitrary subspace
+            # rather than the coarse scales, and basis_offset selects no frequency
+            # band. This path instead builds the basis in 'periodization' mode,
+            # where the synthesis operator is already square and orthonormal at
+            # even lengths, and orthonormalises by QR. QR is Householder, hence
+            # triangular, so span(first k rows) equals span(first k wavelet
+            # functions) and the coarse-to-fine ordering survives truncation.
+            #
+            # Note what this does NOT rescue. Truncating mid-band drops translates,
+            # and each translate covers only part of the time axis, so a localised
+            # basis truncated inside a band leaves regions of the target
+            # unreachable. Captured energy therefore grows roughly linearly in d
+            # within a band and jumps at the boundary, whereas a global basis
+            # concentrates its energy in the first few rows. That is a liability of
+            # locality under FIXED truncation, and it does not exist under the per
+            # signal selection that makes wavelets good in the first place.
+            family = kind.split(":", 1)[1]
+            level = min(
+                pywt.dwt_max_level(target_length, PyWavelet(family).dec_len),
+                max_decomp_level,
+            )
+            structure = pywt.wavedec(
+                np.zeros(target_length), family, level=level, mode="periodization"
+            )
+            band_lengths = [len(c) for c in structure]
+            rows = []
+            for band_idx, band_len in enumerate(band_lengths):
+                for j in range(band_len):
+                    impulse = [np.zeros(l) for l in band_lengths]
+                    impulse[band_idx][j] = 1.0
+                    rows.append(
+                        pywt.waverec(impulse, family, mode="periodization")[
+                            :target_length
+                        ]
+                    )
+            raw = np.array(rows, dtype=np.float64)
+            q, r = np.linalg.qr(raw.T)
+            diag = np.abs(np.diag(r))
+            keep = diag > 1e-10 * max(diag[0], np.finfo(np.float64).tiny)
+            ortho = q.T[keep]
+            full_rank = ortho.shape[0]
+            offset = min(basis_offset, full_rank - 1)
+            available = full_rank - offset
+            effective_dim = available if basis_dim is None else min(available, basis_dim)
+            return torch.tensor(
+                ortho[offset : offset + effective_dim, :], dtype=torch.float32
+            )
+
         if kind.startswith("kl:"):
             prefix = kind.split(":", 1)[1]
             path = f"{prefix}_{target_length}.npy"
@@ -2705,9 +2760,10 @@ class _WaveletGeneratorV3(nn.Module):
             wavelet_type == "dct"
             or wavelet_type.startswith("random_ortho")
             or wavelet_type.startswith("kl:")
+            or wavelet_type.startswith("ordered:")
         ):
             return _WaveletGeneratorV3._build_control_basis(
-                target_length, wavelet_type, basis_dim, basis_offset
+                target_length, wavelet_type, basis_dim, basis_offset, max_decomp_level
             )
 
         wavelet = PyWavelet(wavelet_type)

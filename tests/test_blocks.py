@@ -1279,6 +1279,74 @@ class TestControlBases:
         assert forecast.shape == (4, 6)
 
 
+class TestOrderedWaveletBasis:
+    """Band-ordering-preserving orthonormalisation.
+
+    The default path SVDs the raw DWT basis and orders rows by singular value,
+    which destroys the dyadic level ordering, so truncation keeps an arbitrary
+    subspace. The 'ordered:' path builds in periodization mode and orthonormalises
+    by QR, which is triangular, so the coarse-to-fine ordering survives.
+    """
+
+    CASES = [(48, "db3"), (18, "db3"), (96, "coif2"), (240, "db3"), (90, "db3")]
+
+    @pytest.mark.parametrize("m,wav", CASES)
+    def test_rows_orthonormal(self, m, wav):
+        d = max(1, m // 3)
+        basis = b._WaveletGeneratorV3._build_basis(m, f"ordered:{wav}", 5, d)
+        assert basis.shape == (d, m)
+        gram = basis @ basis.T
+        assert torch.allclose(gram, torch.eye(d), atol=1e-5)
+
+    @pytest.mark.parametrize("m,wav", CASES)
+    def test_shape_matches_svd_path(self, m, wav):
+        """Parameter parity: an ordered arm must be swappable for an SVD arm."""
+        d = max(1, m // 3)
+        svd = b._WaveletGeneratorV3._build_basis(m, wav, 5, d)
+        ordered = b._WaveletGeneratorV3._build_basis(m, f"ordered:{wav}", 5, d)
+        assert ordered.shape == svd.shape
+
+    def test_nesting_is_preserved(self):
+        """span(first k ordered rows) == span(first k rows of the k+1 row basis).
+
+        This is the property the SVD path lacks, and the reason truncation keeps
+        the coarse scales rather than an arbitrary subspace.
+        """
+        small = b._WaveletGeneratorV3._build_basis(48, "ordered:db3", 5, 6).numpy()
+        large = b._WaveletGeneratorV3._build_basis(48, "ordered:db3", 5, 12).numpy()
+        assert np.allclose(large[:6], small, atol=1e-5)
+
+    def test_ordering_differs_from_svd(self):
+        svd = b._WaveletGeneratorV3._build_basis(48, "db3", 5, 16)
+        ordered = b._WaveletGeneratorV3._build_basis(48, "ordered:db3", 5, 16)
+        assert not torch.allclose(svd, ordered, atol=1e-3)
+
+    def test_captures_more_of_a_smooth_signal_than_svd(self):
+        """The point of the fix, in one assertion.
+
+        A DC-dominated target is spanned by the coarse scales, so band ordering
+        must capture far more of it than an arbitrary equal-rank subspace.
+        """
+        y = np.ones((64, 48)) + 0.05 * np.sin(
+            np.linspace(0, 2 * np.pi, 48)[None, :]
+        )
+        cap = lambda B: float(((y @ B.T) ** 2).sum() / (y**2).sum())
+        svd = b._WaveletGeneratorV3._build_basis(48, "db3", 5, 16).numpy()
+        ordered = b._WaveletGeneratorV3._build_basis(48, "ordered:db3", 5, 16).numpy()
+        assert cap(ordered) > 0.99
+        assert cap(ordered) > cap(svd)
+
+    def test_block_forward_and_param_parity(self):
+        svd = b.WaveletV3(256, 48, 12, basis_dim=12, wavelet_type="db3")
+        ordered = b.WaveletV3(256, 48, 12, basis_dim=12, wavelet_type="ordered:db3")
+        assert sum(p.numel() for p in ordered.parameters()) == sum(
+            p.numel() for p in svd.parameters()
+        )
+        backcast, forecast = ordered(torch.randn(4, 48))
+        assert backcast.shape == (4, 48)
+        assert forecast.shape == (4, 12)
+
+
 class TestKLBasis:
     """Precomputed Karhunen-Loeve basis, the optimum linear approximation theory
     names for a fixed d-dimensional subspace."""

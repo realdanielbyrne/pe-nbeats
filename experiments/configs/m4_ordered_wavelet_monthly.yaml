@@ -1,0 +1,163 @@
+# ============================================================
+# M4-Monthly — the wavelet given its band ordering back
+#
+# WHY THIS EXISTS. Every truncated-rank comparison in this repository has been
+# unfair to the wavelet, and I found out why only after claiming otherwise. The
+# default basis path SVDs the raw DWT synthesis matrix and keeps rows by singular
+# value. That mixes every wavelet function together, so truncation retains an
+# arbitrary subspace rather than the coarse scales, and basis_offset selects no
+# frequency band at all. Measured captured energy at d = 6 of 18 on M4-Monthly:
+#
+#     SVD ordering (what the paper measured)  0.148853
+#     band ordering (this config)             0.658277
+#     orthonormal DCT                         0.995159
+#     Karhunen Loeve optimum                  0.995334
+#
+# So the 104.58 sMAPE previously attributed to a Daubechies basis is a measurement
+# of my own scrambling, not of wavelets. The claim that a wavelet finishes behind
+# random orthonormal draws is WITHDRAWN pending this config.
+#
+# THE FIX. Build in 'periodization' mode, where the synthesis operator is already
+# square and orthonormal at even lengths, then orthonormalise by QR. QR is
+# Householder and therefore triangular, so span(first k rows) equals span(first k
+# wavelet functions) and the coarse-to-fine ordering survives truncation. Verified
+# nesting residual 1.3e-15 against 4.5 for the SVD path.
+#
+# WHAT THE FIX DOES NOT RESCUE, AND THIS IS THE REAL FINDING. Captured energy for
+# the band-ordered wavelet grows almost LINEARLY in d inside a band and jumps only
+# at the boundary. On Hourly, bands are [6, 6, 12, 24] and capture runs
+# 0.163, 0.334, 0.500, 0.661, 0.831 for d = 1..5, then 0.997 at d = 6. The reason
+# is spatial coverage: each retained translate covers a fraction of the time axis,
+# so truncating mid-band leaves part of the horizon literally unreachable. The DCT
+# is already at 0.986 by d = 1 because its first row is constant and spans the
+# whole domain. Locality, which is exactly what makes a wavelet good under per
+# signal selection, becomes a LIABILITY under fixed truncation.
+#
+# PREDICTION, REGISTERED BEFORE TRAINING. Monthly is the harsh case, because
+# d = 6 sits INSIDE the first band of 9, so three translates of coverage are
+# missing and capture is only 0.658 against the DCT's 0.995. Therefore:
+#   1. ordered db3 at d = 6 should beat the SVD arm's 104.578 substantially,
+#      since 0.658 is far above 0.149
+#   2. ordered db3 at d = 6 should still LOSE clearly to the DCT's 13.891,
+#      because a third of the horizon is unreachable
+#   3. ordered db3 at d = 9, on the band boundary with capture 0.996, should
+#      close almost the whole gap and land near the DCT
+# Row 3 is the decisive one: it moves rank by three and coverage from partial to
+# complete, so if coverage is the mechanism the improvement should be far larger
+# than three extra basis rows could otherwise buy.
+# FALSIFIED IF: d = 9 fails to close the gap (coverage is not the mechanism), or
+# d = 6 already matches the DCT (capture does not govern accuracy).
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_ordered_wavelet_monthly.yaml
+# ============================================================
+
+experiment_name: m4_ordered_wavelet_monthly
+category: basis_identity
+description: >
+  M4-Monthly at forecast rank 6 of 18 with a band-ordering-preserving wavelet
+  basis, parameter-identical to the SVD-ordered and DCT arms already measured.
+  Isolates how much of the wavelet's poor showing at truncated rank was caused by
+  the orthogonalisation destroying its dyadic ordering.
+
+dataset: m4
+periods:
+  - Monthly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Monthly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5       # L = 90
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  g_width: 256
+  basis_dim: eq_fcast          # backcast pinned at 18 x 90, as in every arm
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42                # identical seeds to the arms being compared
+
+extra_csv_columns:
+  - forecast_basis_dim_cfg
+  - basis_kind
+  - basis_ordering
+  - predicted_capture
+  - band_boundary
+
+configs:
+  - name: W_10s_fbd6_db3_ordered
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 6, wavelet_type: "ordered:db3"}
+    extra_fields:
+      forecast_basis_dim_cfg: 6
+      basis_kind: db3
+      basis_ordering: band
+      predicted_capture: 0.658277
+      band_boundary: inside
+
+  # Band boundary: d = 9 completes the approximation band, restoring full spatial
+  # coverage. Capture jumps 0.658 -> 0.996 for three extra rows.
+  - name: W_10s_fbd9_db3_ordered
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 9, wavelet_type: "ordered:db3"}
+    extra_fields:
+      forecast_basis_dim_cfg: 9
+      basis_kind: db3
+      basis_ordering: band
+      predicted_capture: 0.996171
+      band_boundary: exact
+
+  # Rank-matched DCT reference for the d = 9 arm.
+  - name: W_10s_fbd9_dct
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 9, wavelet_type: "dct"}
+    extra_fields:
+      forecast_basis_dim_cfg: 9
+      basis_kind: dct
+      basis_ordering: frequency
+      predicted_capture: 0.996745
+      band_boundary: n_a
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_ordered_wavelet_monthly_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true

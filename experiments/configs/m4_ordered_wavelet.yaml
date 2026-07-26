@@ -1,0 +1,157 @@
+# ============================================================
+# M4-Hourly — the wavelet given its band ordering back
+#
+# WHY THIS EXISTS. Every truncated-rank comparison in this repository has been
+# unfair to the wavelet, and I found out why only after claiming otherwise. The
+# default basis path SVDs the raw DWT synthesis matrix and keeps rows by singular
+# value. That mixes every wavelet function together, so truncation retains an
+# arbitrary subspace rather than the coarse scales, and basis_offset selects no
+# frequency band at all. Measured captured energy at d = 16 of 48 on M4-Hourly:
+#
+#     SVD ordering (what the paper measured)  0.347765
+#     band ordering (this config)             0.999885
+#     orthonormal DCT                         0.999964
+#     Karhunen Loeve optimum                  0.999981
+#
+# So the 73.95 sMAPE previously attributed to a Daubechies basis is a measurement
+# of my own scrambling, not of wavelets. The claim that a wavelet finishes behind
+# random orthonormal draws is WITHDRAWN pending this config.
+#
+# THE FIX. Build in 'periodization' mode, where the synthesis operator is already
+# square and orthonormal at even lengths, then orthonormalise by QR. QR is
+# Householder and therefore triangular, so span(first k rows) equals span(first k
+# wavelet functions) and the coarse-to-fine ordering survives truncation. Verified
+# nesting residual 1.3e-15 against 4.5 for the SVD path.
+#
+# WHAT THE FIX DOES NOT RESCUE, AND THIS IS THE REAL FINDING. Captured energy for
+# the band-ordered wavelet grows almost LINEARLY in d inside a band and jumps only
+# at the boundary. On Hourly, bands are [6, 6, 12, 24] and capture runs
+# 0.163, 0.334, 0.500, 0.661, 0.831 for d = 1..5, then 0.997 at d = 6. The reason
+# is spatial coverage: each retained translate covers a fraction of the time axis,
+# so truncating mid-band leaves part of the horizon literally unreachable. The DCT
+# is already at 0.976 by d = 1 because its first row is constant and spans the
+# whole domain. Locality, which is exactly what makes a wavelet good under per
+# signal selection, becomes a LIABILITY under fixed truncation.
+#
+# PREDICTION, REGISTERED BEFORE TRAINING. d = 16 sits past the second band
+# boundary at 12, so coverage is complete and capture is 0.999885, a whisker under
+# the DCT's 0.999964. Therefore:
+#   1. ordered db3 should land NEAR the DCT's 10.287, not near the SVD arm's 73.946
+#   2. ordered db3 should still not BEAT the DCT, since its capture is lower
+#   3. the gap to the DCT should be small, since the capture gap is small
+# FALSIFIED IF: ordered db3 stays near 73.9 (then the ordering was not the cause),
+# or beats the DCT decisively (then capture is not what governs accuracy).
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_ordered_wavelet.yaml
+# ============================================================
+
+experiment_name: m4_ordered_wavelet
+category: basis_identity
+description: >
+  M4-Hourly at forecast rank 16 of 48 with a band-ordering-preserving wavelet
+  basis, parameter-identical to the SVD-ordered and DCT arms already measured.
+  Isolates how much of the wavelet's poor showing at truncated rank was caused by
+  the orthogonalisation destroying its dyadic ordering.
+
+dataset: m4
+periods:
+  - Hourly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Hourly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5       # L = 240
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  g_width: 256
+  basis_dim: eq_fcast          # backcast pinned at 48 x 240, as in every arm
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42                # identical seeds to the arms being compared
+
+extra_csv_columns:
+  - forecast_basis_dim_cfg
+  - basis_kind
+  - basis_ordering
+  - predicted_capture
+  - band_boundary
+
+configs:
+  - name: W_10s_fbd16_db3_ordered
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 16, wavelet_type: "ordered:db3"}
+    extra_fields:
+      forecast_basis_dim_cfg: 16
+      basis_kind: db3
+      basis_ordering: band
+      predicted_capture: 0.999885
+      band_boundary: past
+
+  # Mid-band control: d = 5 sits inside the first band of 6, so one translate of
+  # coverage is missing and capture collapses to 0.831. Tests the coverage
+  # mechanism directly, at a rank where the DCT is already at 0.995.
+  - name: W_10s_fbd5_db3_ordered
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 5, wavelet_type: "ordered:db3"}
+    extra_fields:
+      forecast_basis_dim_cfg: 5
+      basis_kind: db3
+      basis_ordering: band
+      predicted_capture: 0.831223
+      band_boundary: inside
+
+  - name: W_10s_fbd5_dct
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 5, wavelet_type: "dct"}
+    extra_fields:
+      forecast_basis_dim_cfg: 5
+      basis_kind: dct
+      basis_ordering: frequency
+      predicted_capture: 0.995404
+      band_boundary: n_a
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_ordered_wavelet_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
