@@ -302,6 +302,7 @@ class NBeatsNet(_NBeatsBase):
         basis_dim: int = 32,
         basis_offset: int = 0,
         stack_basis_offsets: list = None,
+        stack_basis_dims: list = None,
         forecast_basis_dim: int = None,
         theta_activation: bool = False,
         wavelet_type: str = "db3",
@@ -516,6 +517,7 @@ class NBeatsNet(_NBeatsBase):
         self.basis_dim = basis_dim
         self.basis_offset = basis_offset
         self.stack_basis_offsets = stack_basis_offsets
+        self.stack_basis_dims = stack_basis_dims
         self.forecast_basis_dim = forecast_basis_dim
         self.theta_activation = theta_activation
         self.wavelet_type = wavelet_type
@@ -564,6 +566,21 @@ class NBeatsNet(_NBeatsBase):
             effective_offset = self.stack_basis_offsets[stack_idx]
         else:
             effective_offset = self.basis_offset
+
+        # Per-stack basis RANK, the nested counterpart of stack_basis_offsets.
+        # An offset selects rows [o : full_rank], which discards the LEADING rows.
+        # That is survivable for a basis whose ordering is not aligned with where
+        # the data's energy sits, and ruinous for one that is: on M4-Hourly, rows
+        # [8:48] of an SVD-ordered db3 basis still capture 0.895 of the target
+        # energy, while the same window of a DCT captures 0.0003, because the DCT
+        # keeps its constant row first and the offset throws it away. Varying the
+        # rank instead selects rows [0 : d_k], so every stack retains the leading
+        # rows and only its capacity differs. That is the form of tiering an
+        # energy-ordered basis can actually use.
+        if self.stack_basis_dims and stack_idx < len(self.stack_basis_dims):
+            effective_basis_dim = self.stack_basis_dims[stack_idx]
+        else:
+            effective_basis_dim = self.basis_dim
 
         for block_id in range(self.n_blocks_per_stack):
             if self.share_weights and block_id != 0:
@@ -660,7 +677,7 @@ class NBeatsNet(_NBeatsBase):
                         self.backcast_length,
                         self.forecast_length,
                         trend_dim=self.trend_thetas_dim,
-                        wavelet_dim=self.basis_dim,
+                        wavelet_dim=effective_basis_dim,
                         basis_offset=effective_offset,
                         share_weights=self.share_weights,
                         activation=self.activation,
@@ -676,7 +693,7 @@ class NBeatsNet(_NBeatsBase):
                         self.backcast_length,
                         self.forecast_length,
                         trend_dim=self.trend_thetas_dim,
-                        wavelet_dim=self.basis_dim,
+                        wavelet_dim=effective_basis_dim,
                         generic_dim=self.generic_dim,
                         basis_offset=effective_offset,
                         share_weights=self.share_weights,
@@ -690,7 +707,7 @@ class NBeatsNet(_NBeatsBase):
                 elif stack_type in ("TrendWaveletAE", "TrendWaveletAELG"):
                     block_kwargs = dict(
                         trend_dim=self.trend_thetas_dim,
-                        wavelet_dim=self.basis_dim,
+                        wavelet_dim=effective_basis_dim,
                         basis_offset=effective_offset,
                         share_weights=self.share_weights,
                         activation=self.activation,
@@ -716,7 +733,7 @@ class NBeatsNet(_NBeatsBase):
                 ):
                     block_kwargs = dict(
                         trend_dim=self.trend_thetas_dim,
-                        wavelet_dim=self.basis_dim,
+                        wavelet_dim=effective_basis_dim,
                         generic_dim=self.generic_dim,
                         basis_offset=effective_offset,
                         share_weights=self.share_weights,
@@ -772,7 +789,7 @@ class NBeatsNet(_NBeatsBase):
                             units,
                             self.backcast_length,
                             self.forecast_length,
-                            self.basis_dim,
+                            effective_basis_dim,
                             effective_offset,
                             self.share_weights,
                             self.activation,
@@ -786,7 +803,7 @@ class NBeatsNet(_NBeatsBase):
                             units,
                             self.backcast_length,
                             self.forecast_length,
-                            self.basis_dim,
+                            effective_basis_dim,
                             effective_offset,
                             self.share_weights,
                             self.activation,
@@ -979,6 +996,7 @@ class NHiTSNet(_NBeatsBase):
         basis_dim: int = 32,
         basis_offset: int = 0,
         stack_basis_offsets: list = None,
+        stack_basis_dims: list = None,
         forecast_basis_dim: int = None,
         theta_activation: bool = False,
         wavelet_type: str = "db3",
@@ -1081,6 +1099,7 @@ class NHiTSNet(_NBeatsBase):
         self.basis_dim = basis_dim
         self.basis_offset = basis_offset
         self.stack_basis_offsets = stack_basis_offsets
+        self.stack_basis_dims = stack_basis_dims
         self.forecast_basis_dim = forecast_basis_dim
         self.theta_activation = theta_activation
         self.wavelet_type = wavelet_type
@@ -1153,6 +1172,21 @@ class NHiTSNet(_NBeatsBase):
             effective_offset = self.stack_basis_offsets[stack_idx]
         else:
             effective_offset = self.basis_offset
+
+        # Per-stack basis RANK, the nested counterpart of stack_basis_offsets.
+        # An offset selects rows [o : full_rank], which discards the LEADING rows.
+        # That is survivable for a basis whose ordering is not aligned with where
+        # the data's energy sits, and ruinous for one that is: on M4-Hourly, rows
+        # [8:48] of an SVD-ordered db3 basis still capture 0.895 of the target
+        # energy, while the same window of a DCT captures 0.0003, because the DCT
+        # keeps its constant row first and the offset throws it away. Varying the
+        # rank instead selects rows [0 : d_k], so every stack retains the leading
+        # rows and only its capacity differs. That is the form of tiering an
+        # energy-ordered basis can actually use.
+        if self.stack_basis_dims and stack_idx < len(self.stack_basis_dims):
+            effective_basis_dim = self.stack_basis_dims[stack_idx]
+        else:
+            effective_basis_dim = self.basis_dim
 
         ae_latent_blocks = (
             "GenericAE",
@@ -1251,7 +1285,7 @@ class NHiTSNet(_NBeatsBase):
                         effective_backcast_length,
                         effective_forecast_length,
                         trend_dim=self.trend_thetas_dim,
-                        wavelet_dim=self.basis_dim,
+                        wavelet_dim=effective_basis_dim,
                         basis_offset=effective_offset,
                         share_weights=self.share_weights,
                         activation=self.activation,
@@ -1267,7 +1301,7 @@ class NHiTSNet(_NBeatsBase):
                         effective_backcast_length,
                         effective_forecast_length,
                         trend_dim=self.trend_thetas_dim,
-                        wavelet_dim=self.basis_dim,
+                        wavelet_dim=effective_basis_dim,
                         generic_dim=self.generic_dim,
                         basis_offset=effective_offset,
                         share_weights=self.share_weights,
@@ -1281,7 +1315,7 @@ class NHiTSNet(_NBeatsBase):
                 elif stack_type in ("TrendWaveletAE", "TrendWaveletAELG"):
                     block_kwargs = dict(
                         trend_dim=self.trend_thetas_dim,
-                        wavelet_dim=self.basis_dim,
+                        wavelet_dim=effective_basis_dim,
                         basis_offset=effective_offset,
                         share_weights=self.share_weights,
                         activation=self.activation,
@@ -1307,7 +1341,7 @@ class NHiTSNet(_NBeatsBase):
                 ):
                     block_kwargs = dict(
                         trend_dim=self.trend_thetas_dim,
-                        wavelet_dim=self.basis_dim,
+                        wavelet_dim=effective_basis_dim,
                         generic_dim=self.generic_dim,
                         basis_offset=effective_offset,
                         share_weights=self.share_weights,

@@ -1050,6 +1050,7 @@ def run_single_experiment(
     basis_dim=BASIS_DIM,
     basis_offset=0,
     stack_basis_offsets=None,
+    stack_basis_dims=None,  # per-stack basis RANK (nested), counterpart of offsets
     forecast_basis_dim=None,
     extra_row=None,
     csv_columns=None,
@@ -1217,6 +1218,7 @@ def run_single_experiment(
             basis_dim=basis_dim,
             basis_offset=basis_offset,
             stack_basis_offsets=stack_basis_offsets,
+            stack_basis_dims=stack_basis_dims,
             forecast_basis_dim=forecast_basis_dim,
             trend_thetas_dim=trend_thetas_dim,
             generic_dim=generic_dim,

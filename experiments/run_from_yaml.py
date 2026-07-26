@@ -961,6 +961,7 @@ def run_single_config(
         ),
         basis_offset=block_params.get("basis_offset", 0),
         stack_basis_offsets=block_params.get("stack_basis_offsets", None),
+        stack_basis_dims=block_params.get("stack_basis_dims", None),
         extra_row=extra_row if extra_row else None,
         csv_columns=csv_columns,
         tb_enabled=bool(logging_cfg.get("tensorboard", False)),

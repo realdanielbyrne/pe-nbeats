@@ -1,0 +1,218 @@
+# ============================================================
+# M4-Hourly — tiering by RANK instead of by OFFSET
+#
+# THE OBSERVATION THAT PROMPTED THIS. The best frozen basis arm on M4-Hourly is
+# T+DB3V3_30s_tiered_agf at 8.751 sMAPE and 18.18M parameters, level with the
+# 43.58M baseline. It is a tiered arm, meaning its wavelet stacks take rows
+# [offset : 48] for offsets 0, 8, 16, 24, 32, so twelve of its fifteen wavelet
+# blocks are TRUNCATED. That looks like it should lose to a complete DCT or KL
+# basis, and asking why it does not exposes something the paper has not said.
+#
+# WHY OFFSET TIERING AND ENERGY-ORDERED BASES ARE INCOMPATIBLE. An offset
+# discards the LEADING rows. Whether that is survivable depends entirely on
+# whether the ordering is aligned with where the data's energy sits. Per-block
+# captured energy on M4-Hourly across the five tiers:
+#
+#   basis          form     t1      t2      t3      t4      t5     mean
+#   -----------    ------   -----   -----   -----   -----   -----  -----
+#   SVD db3        OFFSET   1.000   0.895   0.652   0.427   0.249  0.645
+#   DCT            OFFSET   1.000   0.000   0.000   0.000   0.000  0.200
+#   KL             OFFSET   1.000   0.000   0.000   0.000   0.000  0.200
+#   band-ord db3   OFFSET   1.000   0.002   0.000   0.000   0.000  0.200
+#   SVD db3        RANK     1.000   0.960   0.751   0.573   0.348  0.726
+#   DCT            RANK     1.000   1.000   1.000   1.000   1.000  1.000
+#   KL             RANK     1.000   1.000   1.000   1.000   1.000  1.000
+#   band-ord db3   RANK     1.000   1.000   1.000   1.000   1.000  1.000
+#
+# The DCT keeps its constant row first, and M4 windows are DC dominated, so an
+# offset of 8 throws away 0.9997 of the reachable energy. The SVD ordered wavelet
+# survives the same offset because its ordering is NOT energy aligned: the energy
+# is smeared across all rows, so any contiguous window retains a workable share.
+#
+# **So the scrambling I called a defect is exactly what makes offset tiering
+# viable, and the two facts are the same fact.**
+#
+# THE FIX, AND THE CANDIDATE CONTRIBUTION. Tier the RANK instead: give stack k
+# rows [0 : d_k] rather than [o_k : 48]. Every block then retains the leading
+# rows and only its capacity differs. For an energy-ordered basis this lifts mean
+# per-block capture from 0.200 to 1.000, and it is strictly better even for the
+# SVD wavelet, 0.726 against 0.645. This is what stack_basis_dims implements.
+#
+# PREDICTIONS, REGISTERED BEFORE TRAINING, in descending confidence:
+#   1. DCT + OFFSET is much WORSE than db3 + OFFSET. The naive substitution the
+#      capture table warns against. If this does not hold, per-block capture is
+#      not what governs a tiered model.
+#   2. DCT + RANK, KL + RANK and band ordered db3 + RANK all BEAT db3 + OFFSET,
+#      that is they beat 8.751, since mean capture rises 0.645 -> 1.000.
+#   3. db3 + RANK modestly beats db3 + OFFSET, 0.726 against 0.645.
+#   4. The three RANK arms with capture 1.000 are statistically indistinguishable
+#      from each other, because at complete per-block rank the basis is inert by
+#      the completeness argument. Identity should stop mattering exactly where
+#      capture saturates.
+# Prediction 4 is the one that makes this a test rather than a search: it says
+# the win comes from the tiering FORM, not from picking a better basis.
+#
+# CAVEAT ON THE 8.751 INCUMBENT, which this study also addresses. That number is
+# the best of SIXTEEN Hourly configs in its study, its cell has only n = 8 of 10
+# (the two runs were never launched, none diverged), and the runner-up is 8.921,
+# which LOSES to the 8.758 baseline by 0.163. So "Hourly reaches parity" currently
+# rests on a single best-of-16 selection, which is close to what chance would
+# produce if every true mean sat slightly above the baseline. The COMPLETE arms
+# below are pre-specified rather than selected, so they measure the level honestly.
+#
+# FALSIFIED IF: the RANK arms fail to beat 8.751 (then tiering's benefit is not
+# about capture at all), or the three complete RANK arms differ significantly
+# (then something other than captured energy is at work).
+#
+# Widths are left at repository defaults so parameter counts match the incumbent
+# arm; do NOT set g_width here.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_hourly_tiered_rank.yaml
+# ============================================================
+
+experiment_name: m4_hourly_tiered_rank
+category: basis_identity
+description: >
+  Tiering by basis rank rather than by basis offset on M4-Hourly, at 30 stacks
+  with active_g=forecast, against the incumbent best frozen basis arm. Tests
+  whether the incumbent's advantage comes from its wavelet or from the fact that
+  offset tiering only tolerates a basis whose ordering is not energy aligned.
+
+dataset: m4
+periods:
+  - Hourly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Hourly: 10
+
+training:
+  active_g: forecast           # agf, worth -0.23 to -0.37 on frozen basis arms
+                               # on Hourly and preferred in 9 of 9 matched stems
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:                  # paper-faithful step schedule, matching the
+  type: multistep              # baseline this study is compared against
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  basis_dim: eq_fcast          # 48 on Hourly
+  trend_thetas_dim: 3
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - basis_kind
+  - tier_form
+  - mean_block_capture
+  - n_stacks
+
+configs:
+  # ── OFFSET form: rows [o : 48]. Discards the leading rows. ─────────────────
+  - name: TW30_db3_tierOFFSET
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 15}
+    block_params:
+      wavelet_type: "db3"
+      stack_basis_offsets: [0,0, 0,0, 0,0, 0,8, 0,8, 0,8, 0,16, 0,16, 0,16, 0,24, 0,24, 0,24, 0,32, 0,32, 0,32]
+    extra_fields: {basis_kind: db3, tier_form: offset, mean_block_capture: 0.6446, n_stacks: 30}
+
+  - name: TW30_dct_tierOFFSET
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 15}
+    block_params:
+      wavelet_type: "dct"
+      stack_basis_offsets: [0,0, 0,0, 0,0, 0,8, 0,8, 0,8, 0,16, 0,16, 0,16, 0,24, 0,24, 0,24, 0,32, 0,32, 0,32]
+    extra_fields: {basis_kind: dct, tier_form: offset, mean_block_capture: 0.2001, n_stacks: 30}
+
+  # ── RANK form: rows [0 : d_k]. Every block keeps the leading rows. ─────────
+  - name: TW30_db3_tierRANK
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 15}
+    block_params:
+      wavelet_type: "db3"
+      stack_basis_dims: [48,48, 48,48, 48,48, 48,40, 48,40, 48,40, 48,32, 48,32, 48,32, 48,24, 48,24, 48,24, 48,16, 48,16, 48,16]
+    extra_fields: {basis_kind: db3, tier_form: rank, mean_block_capture: 0.7263, n_stacks: 30}
+
+  - name: TW30_dct_tierRANK
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 15}
+    block_params:
+      wavelet_type: "dct"
+      stack_basis_dims: [48,48, 48,48, 48,48, 48,40, 48,40, 48,40, 48,32, 48,32, 48,32, 48,24, 48,24, 48,24, 48,16, 48,16, 48,16]
+    extra_fields: {basis_kind: dct, tier_form: rank, mean_block_capture: 1.0000, n_stacks: 30}
+
+  - name: TW30_kl_tierRANK
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 15}
+    block_params:
+      wavelet_type: "kl:experiments/bases/m4_hourly"
+      stack_basis_dims: [48,48, 48,48, 48,48, 48,40, 48,40, 48,40, 48,32, 48,32, 48,32, 48,24, 48,24, 48,24, 48,16, 48,16, 48,16]
+    extra_fields: {basis_kind: kl, tier_form: rank, mean_block_capture: 1.0000, n_stacks: 30}
+
+  - name: TW30_db3ordered_tierRANK
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 15}
+    block_params:
+      wavelet_type: "ordered:db3"
+      stack_basis_dims: [48,48, 48,48, 48,48, 48,40, 48,40, 48,40, 48,32, 48,32, 48,32, 48,24, 48,24, 48,24, 48,16, 48,16, 48,16]
+    extra_fields: {basis_kind: db3_ordered, tier_form: rank, mean_block_capture: 1.0000, n_stacks: 30}
+
+  # ── COMPLETE, no tiering: rows [0 : 48] in every block. The cell that was
+  #    never run at agf, and the fairest test of whether the incumbent's tiered
+  #    advantage is real or a best-of-16 selection artifact. Per the completeness
+  #    argument all four should TIE each other; the question is where the level
+  #    sits relative to 8.751 and to the 8.758 baseline.
+  - name: TW30_db3_complete
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 15}
+    block_params: {wavelet_type: "db3"}
+    extra_fields: {basis_kind: db3, tier_form: none, mean_block_capture: 1.0000, n_stacks: 30}
+
+  - name: TW30_dct_complete
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 15}
+    block_params: {wavelet_type: "dct"}
+    extra_fields: {basis_kind: dct, tier_form: none, mean_block_capture: 1.0000, n_stacks: 30}
+
+  - name: TW30_kl_complete
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 15}
+    block_params: {wavelet_type: "kl:experiments/bases/m4_hourly"}
+    extra_fields: {basis_kind: kl, tier_form: none, mean_block_capture: 1.0000, n_stacks: 30}
+
+  - name: TW30_db3ordered_complete
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 15}
+    block_params: {wavelet_type: "ordered:db3"}
+    extra_fields: {basis_kind: db3_ordered, tier_form: none, mean_block_capture: 1.0000, n_stacks: 30}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_hourly_tiered_rank_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
