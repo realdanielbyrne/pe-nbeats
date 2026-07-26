@@ -78,6 +78,14 @@ it: an output activation (27.054 to 9.102, p = 0.002) and a trend branch (9.200 
 control). That both work is the evidence the failure is optimisation. **Proposition 2 guarantees equal
 expressiveness, not equal trainability**, and the paper must say so.
 
+**Monthly replication identifies the failure mode.** There the same cell is bimodal: every basis has
+seeds converging to between 13.3 and 14.7, and only the failure rate differs, 0 of 10 for
+random ortho:7, 1 of 10 for db3, 2 of 10 for random ortho, 4 of 10 for the DCT. On Hourly the DCT
+instead fails on all ten. So **basis identity does not move the converged solution, it moves the
+probability of converging**, which is exactly what an expressiveness guarantee without a trainability
+guarantee predicts, and it is the same bimodal divergence the paper already documents for
+unconstrained linear heads.
+
 Unexplained and recorded as such: interposition reorders the bases, with DCT best at 15.036 while db3
 and the random draws collapse to 44 and 55. Captured energy does not govern that regime.
 
@@ -177,4 +185,7 @@ Hourly seed and is therefore post hoc; a prospective test is registered for Traf
 ## Still running
 
 `m4_p2_boundary` Monthly half (120 runs), `m4_hourly_tiered_rank` (66 of 100 remaining),
-`traffic96_truncated_identity` (18 of 25 remaining, carrying the registered prospective test).
+`traffic96_truncated_identity` (15 of 25 remaining). Its registered prospective test has RESOLVED in
+favour of the account: Karhunen Loève 0.000836 against DCT 0.000880, winning 5 of 5 paired seeds at
+9.3 pooled sd, paired t p = 1.8e-07. Wilcoxon gives 0.0625, the minimum attainable at n = 5, so that
+arm pair was underpowered by construction for the test I registered; replication needs n >= 8.
