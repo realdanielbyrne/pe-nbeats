@@ -1232,3 +1232,47 @@ class TestAsymmetricWaveletFamily:
         backcast, forecast = block(x)
         assert backcast.shape == (4, BACKCAST_LENGTH)
         assert forecast.shape == (4, FORECAST_LENGTH)
+
+
+class TestControlBases:
+    """Non-wavelet orthonormal control bases used to test whether the benefit of a
+    frozen basis is wavelet-specific or a property of any frozen low-rank
+    orthonormal projection."""
+
+    KINDS = ["dct", "random_ortho", "random_ortho:7"]
+
+    @pytest.mark.parametrize("kind", KINDS)
+    @pytest.mark.parametrize("target_length,basis_dim", [(30, 6), (96, 96), (480, 96)])
+    def test_shape_matches_wavelet_path(self, kind, target_length, basis_dim):
+        wav = b._WaveletGeneratorV3._build_basis(target_length, "db3", 5, basis_dim)
+        ctl = b._WaveletGeneratorV3._build_basis(target_length, kind, 5, basis_dim)
+        assert ctl.shape == wav.shape
+        assert ctl.numel() == wav.numel()
+
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_rows_are_orthonormal(self, kind):
+        basis = b._WaveletGeneratorV3._build_basis(120, kind, 5, 40)
+        gram = basis @ basis.T
+        assert torch.allclose(gram, torch.eye(40), atol=1e-4)
+
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_deterministic_across_calls(self, kind):
+        a = b._WaveletGeneratorV3._build_basis(64, kind, 5, 16)
+        c = b._WaveletGeneratorV3._build_basis(64, kind, 5, 16)
+        assert torch.equal(a, c)
+
+    def test_random_draws_differ_by_seed(self):
+        a = b._WaveletGeneratorV3._build_basis(64, "random_ortho", 5, 16)
+        c = b._WaveletGeneratorV3._build_basis(64, "random_ortho:7", 5, 16)
+        assert not torch.allclose(a, c)
+
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_block_forward_and_param_parity(self, kind):
+        wav = b.TrendWavelet(256, 30, 6, wavelet_dim=6, wavelet_type="db3")
+        ctl = b.TrendWavelet(256, 30, 6, wavelet_dim=6, wavelet_type=kind)
+        assert sum(p.numel() for p in ctl.parameters()) == sum(
+            p.numel() for p in wav.parameters()
+        )
+        backcast, forecast = ctl(torch.randn(4, 30))
+        assert backcast.shape == (4, 30)
+        assert forecast.shape == (4, 6)

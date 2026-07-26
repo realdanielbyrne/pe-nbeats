@@ -2634,10 +2634,51 @@ class _WaveletGeneratorV3(nn.Module):
         self.basis = nn.Parameter(basis, requires_grad=False)
 
     @staticmethod
+    def _build_control_basis(target_length, kind, basis_dim=None, basis_offset=0):
+        """Non-wavelet orthonormal control bases.
+
+        Used to test whether the benefit of the frozen basis is wavelet-specific or a
+        property of any frozen orthonormal low-rank projection. Returns the same
+        (effective_dim, target_length) shape as the wavelet path, so a control run is
+        parameter-identical to its wavelet counterpart by construction.
+
+        ``kind`` is either ``'dct'`` (orthonormal DCT-II rows, ordered low to high
+        frequency) or ``'random_ortho'`` / ``'random_ortho:<seed>'`` (rows of a
+        Haar-distributed random orthonormal matrix, deterministic given the seed).
+        """
+        if kind == "dct":
+            n = np.arange(target_length, dtype=np.float64)
+            k = np.arange(target_length, dtype=np.float64)[:, None]
+            ortho = np.cos(np.pi * (n + 0.5) * k / target_length)
+            ortho[0] *= np.sqrt(1.0 / target_length)
+            ortho[1:] *= np.sqrt(2.0 / target_length)
+        else:
+            seed = 0
+            if ":" in kind:
+                seed = int(kind.split(":", 1)[1])
+            rng = np.random.default_rng(seed)
+            q, r = np.linalg.qr(rng.standard_normal((target_length, target_length)))
+            # Sign-fix the QR so the draw is unique (Haar) and reproducible.
+            ortho = (q * np.sign(np.diag(r))).T
+
+        # These bases are full rank by construction, so full_rank == target_length.
+        offset = min(basis_offset, target_length - 1)
+        available = target_length - offset
+        effective_dim = available if basis_dim is None else min(available, basis_dim)
+        return torch.tensor(
+            ortho[offset : offset + effective_dim, :], dtype=torch.float32
+        )
+
+    @staticmethod
     def _build_basis(
         target_length, wavelet_type, max_decomp_level, basis_dim=None, basis_offset=0
     ):
         import logging
+
+        if wavelet_type == "dct" or wavelet_type.startswith("random_ortho"):
+            return _WaveletGeneratorV3._build_control_basis(
+                target_length, wavelet_type, basis_dim, basis_offset
+            )
 
         wavelet = PyWavelet(wavelet_type)
         max_level = pywt.dwt_max_level(target_length, wavelet.dec_len)
