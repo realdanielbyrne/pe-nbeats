@@ -1,0 +1,160 @@
+# ============================================================
+# M4-Hourly FORECAST rank ladder — reconciling N-BEATS with the pellm result
+#
+# THE PUZZLE. In the Transformer repository (pellm), frozen-basis rank clearly
+# matters: raising it improves perplexity, and at matched rank a random
+# orthonormal basis beats a wavelet. On M4, basis identity is a well-powered
+# null (36 paired comparisons, min p = 0.084) and completing the basis actively
+# HURTS (11 of 12 paired comparisons favour the truncated arm, 4 significant).
+# Taken at face value the two repositories disagree.
+#
+# THE PROPOSED RESOLUTION. They are measuring different paths in different
+# regimes, not disagreeing.
+#
+#   pellm (pe_layers.py:313, TrendWaveletLinear) replaces nn.Linear(in, out)
+#   with  x -> theta(x) -> trend_c @ T + wavelet_c @ W.  A rank-d factorisation
+#   of a single feed-forward OUTPUT. Nothing is subtracted; whatever rank cannot
+#   express is simply lost. With hidden_size 576 and wavelet_dim 32-64 the layer
+#   runs at d/m roughly 1/3, deep in the truncated regime, so more rank recovers
+#   more of the dense layer it replaced.
+#
+#   N-BEATS has TWO paths. The FORECAST path is the analogue of pellm's output
+#   path, and on M4 it is already COMPLETE (basis_dim = forecast_length in every
+#   published arm, so d/m = 1). There is no headroom left, which is exactly why
+#   basis identity is inert there. The BACKCAST path is not an output at all: it
+#   is subtracted from the residual stream, so its rank bounds how much of the
+#   input each block may consume. Raising it removes a constraint rather than
+#   adding expressiveness, and that is why completing it hurts.
+#
+# THE TEST. Put N-BEATS into pellm's regime and see whether it behaves like
+# pellm. Pin the backcast basis at the repo default and TRUNCATE the forecast
+# basis, then ladder it back up to complete:
+#
+#   forecast_basis_dim   d/m     regime
+#   ------------------   -----   ---------------------------------------
+#            6           0.125   deeply truncated
+#           16           0.333   pellm's operating point (192/576)
+#           24           0.500   truncated
+#           36           0.750   truncated
+#           48           1.000   complete — the repo default, ALREADY RUN
+#
+# The complete rung is NOT re-run: W_10s_bd_eqfcast in
+# m4/m4_trend_branch_redundancy_results.csv is the identical model at
+# forecast_basis_dim = 48, same protocol, same seeds 42-51.
+#
+# Pure WaveletV3 is used rather than TrendWavelet so that rank is EXACTLY
+# forecast_basis_dim. The trend branch would silently add 3 more rows to the
+# forecast basis and blur the ladder. g_width is set to 256 to match
+# TrendWavelet's t_width, since pure wavelet blocks otherwise default to 512.
+#
+# PREDICTION: sMAPE falls monotonically as forecast rank rises and flattens at
+# d/m = 1. That is pellm's curve, reproduced inside N-BEATS, and it reconciles
+# the two repositories as one law measured at two operating points. It would
+# also explain Traffic-96 (basis_dim 4 -> 96 at H = 96 gave 124.04 -> 36.41),
+# which widened the forecast path from d/m = 0.04 to 1.0.
+# FALSIFIED IF: the forecast ladder is ALSO flat. Then M4 is insensitive to rank
+# on both paths, the divergence from pellm is not about path or regime, and the
+# remaining suspects are architectural (residual cascade versus single layer) or
+# a genuine plumbing difference between the two repositories.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_hourly_forecast_rank.yaml --dry-run
+#   python experiments/run_from_yaml.py experiments/configs/m4_hourly_forecast_rank.yaml
+# ============================================================
+
+experiment_name: m4_hourly_forecast_rank
+category: basis_completeness
+description: >
+  Forecast-basis rank ladder on M4-Hourly with the backcast basis pinned at the
+  repo default, so all variation is on the output path. Reproduces the pellm
+  operating point (d/m = 1/3) inside N-BEATS to test whether the two
+  repositories follow one law at two operating points.
+
+dataset: m4
+periods:
+  - Hourly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Hourly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5       # L = 240
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  wavelet_type: db3
+  g_width: 256                 # match TrendWavelet's t_width, not the 512 default
+  basis_dim: eq_fcast          # backcast basis PINNED at 48 x 240 in every rung
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - forecast_basis_dim_cfg
+  - forecast_coverage_pct
+  - trunk_width
+  - n_stacks
+
+configs:
+  - name: W_10s_fbd6
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 6}
+    extra_fields: {forecast_basis_dim_cfg: 6, forecast_coverage_pct: 12.5, trunk_width: 256, n_stacks: 10}
+
+  - name: W_10s_fbd16
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 16}
+    extra_fields: {forecast_basis_dim_cfg: 16, forecast_coverage_pct: 33.3, trunk_width: 256, n_stacks: 10}
+
+  - name: W_10s_fbd24
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 24}
+    extra_fields: {forecast_basis_dim_cfg: 24, forecast_coverage_pct: 50.0, trunk_width: 256, n_stacks: 10}
+
+  - name: W_10s_fbd36
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 36}
+    extra_fields: {forecast_basis_dim_cfg: 36, forecast_coverage_pct: 75.0, trunk_width: 256, n_stacks: 10}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_hourly_forecast_rank_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true

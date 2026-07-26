@@ -1,0 +1,161 @@
+# ============================================================
+# M4-Hourly Backcast Width Ladder — is the one M4 period the method loses
+# on the one where the frozen basis is most undersized?
+#
+# M4-Hourly is the only period where paper N-BEATS beats every frozen basis
+# variant (NBEATS-IG_30s_agf 8.758 against roughly 9.2 for the wavelet arms).
+# It is also, by a wide margin, the period where the backcast basis is most
+# undersized in ABSOLUTE terms:
+#
+#   period     H    L   forecast d/m   backcast d/m   backcast rows short
+#   Yearly     6    30      1.00           0.20                24
+#   Quarterly  8    40      1.00           0.20                32
+#   Weekly    13    65      1.00           0.20                52
+#   Daily     14    70      1.00           0.20                56
+#   Monthly   18    90      1.00           0.20                72
+#   Hourly    48   240      1.00           0.20               192   <-- 3x the next
+#
+# The d/m RATIO is 0.20 everywhere because L = 5H always, so ratio cannot
+# explain why widening helps on some periods and hurts on others. Under the
+# sliding sweep, doubling basis_dim helps significantly on Hourly (-0.070,
+# p=0.001), Daily (-0.126, p<0.001) and Monthly (-0.086, p=0.032) but HURTS on
+# Quarterly (+0.024, p=0.036) and Weekly (+0.060, p=0.023). Absolute deficit
+# tracks that split better than ratio does, and Hourly sits at the extreme.
+#
+# This ladder sweeps the backcast basis from the repo default to fully complete
+# while pinning the forecast basis at 48. Every arm therefore builds an
+# IDENTICAL forecast basis, so all variation is on the backcast path.
+#
+#   bd=48  -> 20% backcast coverage (the repo default, eq_fcast)
+#   bd=96  -> 40%
+#   bd=144 -> 60%
+#   bd=192 -> 80%
+#   bd=240 -> 100%, complete, never run on M4-Hourly
+#
+# PREDICTION (completeness account): sMAPE falls monotonically with width and
+# the gap to the paper baseline narrows. If the gap closes substantially at
+# bd=240, the Hourly deficit is a rank problem.
+# FALSIFIED IF: the ladder is flat, which would mean the Hourly loss is about
+# the Fourier basis matching Hourly's daily and weekly periodicity rather than
+# about rank, and the method simply loses that period on inductive bias.
+#
+# Wavelet family fixed at db3 (family has no detectable effect: partial eta^2
+# 0.0001-0.0036 at n=1161-2133, Fisher p=0.125 over 8 datasets).
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_hourly_basis_width.yaml --dry-run
+#   python experiments/run_from_yaml.py experiments/configs/m4_hourly_basis_width.yaml
+# ============================================================
+
+experiment_name: m4_hourly_basis_width
+category: basis_width
+description: >
+  Backcast basis width ladder on M4-Hourly at fixed wavelet family, with the
+  forecast basis pinned complete at 48 in every arm so all variation is on the
+  backcast path. Includes the two paper N-BEATS baselines measured under the
+  identical protocol for a like for like gap.
+
+dataset: m4
+periods:
+  - Hourly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Hourly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5     # L = 240
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  trend_thetas_dim: 3
+  wavelet_type: db3
+  forecast_basis_dim: 48     # complete and PINNED in every arm
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - basis_dim_cfg
+  - backcast_coverage_pct
+  - n_stacks
+
+configs:
+  - name: TW_10s_bd48
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {basis_dim: 48}
+    extra_fields: {basis_dim_cfg: 48, backcast_coverage_pct: 20, n_stacks: 10}
+
+  - name: TW_10s_bd96
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {basis_dim: 96}
+    extra_fields: {basis_dim_cfg: 96, backcast_coverage_pct: 40, n_stacks: 10}
+
+  - name: TW_10s_bd144
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {basis_dim: 144}
+    extra_fields: {basis_dim_cfg: 144, backcast_coverage_pct: 60, n_stacks: 10}
+
+  - name: TW_10s_bd192
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {basis_dim: 192}
+    extra_fields: {basis_dim_cfg: 192, backcast_coverage_pct: 80, n_stacks: 10}
+
+  - name: TW_10s_bd240
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {basis_dim: 240}
+    extra_fields: {basis_dim_cfg: 240, backcast_coverage_pct: 100, n_stacks: 10}
+
+  # Paper baselines under the identical protocol, so the gap is like for like.
+  # Generic / Trend / Seasonality blocks ignore basis_dim entirely.
+  - builtin: NBEATS-G
+    name: NBEATS-G_30s_ag0
+    category: paper_baseline
+    extra_fields: {basis_dim_cfg: "", backcast_coverage_pct: "", n_stacks: 30}
+
+  - builtin: NBEATS-I+G
+    name: NBEATS-IG_30s_ag0
+    category: paper_baseline
+    extra_fields: {basis_dim_cfg: "", backcast_coverage_pct: "", n_stacks: 30}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_hourly_basis_width_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true

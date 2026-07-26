@@ -1,0 +1,179 @@
+# ============================================================
+# M4 Basis-Identity Control — is the benefit wavelet-specific?
+#
+# Reviewers K8yb (Qi), CAcc (Q2), y8d1, and the AC all ask the same question:
+# is the gain a property of the WAVELET basis, or of ANY frozen low-rank
+# orthonormal projection at the same rank?
+#
+# This study answers it by holding EVERYTHING constant except the frozen basis
+# matrix itself. `_WaveletGeneratorV3._build_control_basis` returns a matrix of
+# exactly the same (effective_dim, target_length) shape as the wavelet path and
+# stores it the same way (nn.Parameter, requires_grad=False), so the arms are
+# parameter-identical BY CONSTRUCTION -- not merely parameter-matched.
+#
+# Arms (frozen basis only differs):
+#   db3            -- SVD-orthogonalized Daubechies-3 DWT synthesis basis (incumbent)
+#   dct            -- orthonormal DCT-II rows, low->high frequency
+#                     (a localized-in-FREQUENCY, delocalized-in-TIME control;
+#                      directly addresses CAcc Q2 on other localized representations)
+#   random_ortho   -- Haar-distributed random orthonormal rows, seed 0
+#   random_ortho:7 -- second independent random draw, so a null result cannot be
+#                     attributed to one lucky/unlucky basis
+#
+# Two architectures, to separate "basis identity" from "which trunk":
+#   TW    = TrendWavelet     (RootBlock trunk)  -- the wavelet-only isolation arm
+#   TWAE  = TrendWaveletAE   (AE trunk, ld=32)  -- the sub-1M headline family
+#
+# NOTE ON REGIME: basis_dim=eq_fcast means the basis is COMPLETE on the forecast
+# path for every M4 period (d/m = 1). Per the width analysis, basis width -- and
+# by extension basis identity -- is expected to matter least exactly here. This
+# is therefore a CONSERVATIVE test of the wavelet prior on M4. The truncated
+# regime (Traffic-96, d/m = 0.2) is the companion study.
+#
+# Seed-matched: seed_mode sequential from a fixed base seed, so every arm sees
+# the same 10 seeds and arms can be compared with PAIRED tests.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_basis_identity_control.yaml --dry-run
+#   python experiments/run_from_yaml.py experiments/configs/m4_basis_identity_control.yaml
+# ============================================================
+
+experiment_name: m4_basis_identity_control
+category: basis_identity
+description: >
+  Frozen-basis identity control on M4. Holds architecture, parameter count, data,
+  protocol, and seeds fixed and varies ONLY the frozen orthonormal basis matrix
+  (db3 wavelet vs DCT-II vs two independent random orthonormal draws), across two
+  trunks (RootBlock and AE) and all six M4 periods at n=10 seeds.
+
+dataset: m4
+periods:
+  - Yearly
+  - Quarterly
+  - Monthly
+  - Weekly
+  - Daily
+  - Hourly
+
+# ── N-BEATS paper-faithful sampling protocol (identical to
+#    comprehensive_m4_paper_sample.yaml so numbers sit on the same scale) ──────
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Yearly: 1.5
+    Quarterly: 1.5
+    Monthly: 10
+    Weekly: 10
+    Daily: 10
+    Hourly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  trend_thetas_dim: 3
+  basis_dim: eq_fcast
+
+# Seed-matched across arms so comparisons can be paired.
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - arch_family
+  - backbone
+  - basis_kind
+  - basis_is_wavelet
+  - n_stacks
+
+configs:
+  # ── A. RootBlock trunk (TrendWavelet) — wavelet-only isolation ─────────────
+  - name: TW_10s_td3_bdeq_db3
+    category: basis_identity_rb
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {wavelet_type: db3}
+    extra_fields: {arch_family: trendwavelet, backbone: RootBlock, basis_kind: db3, basis_is_wavelet: 1, n_stacks: 10}
+
+  - name: TW_10s_td3_bdeq_dct
+    category: basis_identity_rb
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {wavelet_type: dct}
+    extra_fields: {arch_family: trendwavelet, backbone: RootBlock, basis_kind: dct, basis_is_wavelet: 0, n_stacks: 10}
+
+  - name: TW_10s_td3_bdeq_randortho0
+    category: basis_identity_rb
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {wavelet_type: random_ortho}
+    extra_fields: {arch_family: trendwavelet, backbone: RootBlock, basis_kind: random_ortho_s0, basis_is_wavelet: 0, n_stacks: 10}
+
+  - name: TW_10s_td3_bdeq_randortho7
+    category: basis_identity_rb
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {wavelet_type: "random_ortho:7"}
+    extra_fields: {arch_family: trendwavelet, backbone: RootBlock, basis_kind: random_ortho_s7, basis_is_wavelet: 0, n_stacks: 10}
+
+  # ── B. AE trunk (TrendWaveletAE, ld=32) — the sub-1M headline family ───────
+  - name: TWAE_10s_ld32_db3
+    category: basis_identity_ae
+    stacks: {type: homogeneous, block: TrendWaveletAE, n: 10}
+    block_params: {wavelet_type: db3, latent_dim: 32}
+    extra_fields: {arch_family: trendwavelet_ae, backbone: AERootBlock, basis_kind: db3, basis_is_wavelet: 1, n_stacks: 10}
+
+  - name: TWAE_10s_ld32_dct
+    category: basis_identity_ae
+    stacks: {type: homogeneous, block: TrendWaveletAE, n: 10}
+    block_params: {wavelet_type: dct, latent_dim: 32}
+    extra_fields: {arch_family: trendwavelet_ae, backbone: AERootBlock, basis_kind: dct, basis_is_wavelet: 0, n_stacks: 10}
+
+  - name: TWAE_10s_ld32_randortho0
+    category: basis_identity_ae
+    stacks: {type: homogeneous, block: TrendWaveletAE, n: 10}
+    block_params: {wavelet_type: random_ortho, latent_dim: 32}
+    extra_fields: {arch_family: trendwavelet_ae, backbone: AERootBlock, basis_kind: random_ortho_s0, basis_is_wavelet: 0, n_stacks: 10}
+
+  - name: TWAE_10s_ld32_randortho7
+    category: basis_identity_ae
+    stacks: {type: homogeneous, block: TrendWaveletAE, n: 10}
+    block_params: {wavelet_type: "random_ortho:7", latent_dim: 32}
+    extra_fields: {arch_family: trendwavelet_ae, backbone: AERootBlock, basis_kind: random_ortho_s7, basis_is_wavelet: 0, n_stacks: 10}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_basis_identity_control_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true

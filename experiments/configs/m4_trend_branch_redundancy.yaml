@@ -1,0 +1,160 @@
+# ============================================================
+# M4 Trend Branch Redundancy — is the polynomial trend branch dead weight
+# once the wavelet basis is complete, and does it actively interfere?
+#
+# TrendWavelet synthesises each path as a SUM of two frozen bases:
+#
+#     forecast = T_f^T theta_t  +  W_f^T theta_w        (blocks.py, TrendWavelet.forward)
+#
+# with T_f of shape (trend_dim x H) and W_f of shape (forecast_basis_dim x H).
+# Every M4 configuration in the paper sets basis_dim = forecast_length, which
+# makes W_f square and orthonormal, hence a complete basis for R^H. The trend
+# branch's output T_f^T theta_t therefore lies ENTIRELY inside span(W_f): it
+# adds exactly zero representable functions on the forecast path. The same
+# argument applies to the backcast path in any arm where basis_dim = L.
+#
+# Redundant is not the same as harmless. Two overlapping parameterisations of
+# one output space make the mapping from weights to functions non-identifiable,
+# so the two branches can compete for the same gradient signal. That could
+# regularise (an implicit ensemble over parameterisations) or it could hurt.
+# The M4 Hourly width ladder found completing the backcast to be flat to
+# slightly harmful (bd48 9.224 -> bd240 9.310, paired p = 0.193), and branch
+# interference is a live candidate explanation.
+#
+# DESIGN: a 2x2 on {trend branch present, absent} x {backcast 20%, backcast 100%}.
+# The two trend-present cells already exist and are NOT re-run:
+#
+#   cell                          arm                     source
+#   ---------------------------   ---------------------   -------------------------
+#   trend + backcast 20%          TW_10s_td3_bdeq_db3     m4/m4_basis_identity_control_results.csv
+#   trend + backcast 100%         TW_10s_bd_eqbcast       m4/m4_complete_basis_results.csv
+#   no trend + backcast 20%       W_10s_bd_eqfcast        THIS CONFIG
+#   no trend + backcast 100%      W_10s_bd_eqbcast        THIS CONFIG
+#
+# All four share the protocol, training, lr_scheduler and seed schedule below,
+# so cells pair on (period, seed).
+#
+# PARAMETER MATCHING is the trap here. Pure WaveletV3 blocks draw their trunk
+# width from g_width (default 512) while TrendWavelet draws from t_width
+# (default 256), which would have made the pure arm roughly four times wider in
+# the trunk. Setting g_width = 256 matches them: on Yearly the pure arm carries
+# 2,083,840 trainable parameters against 2,076,250 for TrendWavelet at default
+# width, and 2,145,280 against 2,161,060 once complete. Both within 0.7%, and
+# the pure arm is the SMALLER of the two in the complete cell.
+#
+# PREDICTION: if the trend branch is merely inert, dropping it is flat at both
+# widths and the 2x2 interaction is null. If it interferes, dropping it helps
+# specifically in the complete cell, producing a positive interaction, and the
+# flat completeness ladder is explained by branch competition rather than by
+# completeness being useless.
+# FALSIFIED IF: dropping the trend branch HURTS at complete rank, which would
+# mean the trend basis contributes optimisation value rather than
+# representational value, since it provably contributes no representational
+# value at all once W is square.
+#
+# Wavelet family fixed at db3 (family is a well-powered null).
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_trend_branch_redundancy.yaml --dry-run
+#   python experiments/run_from_yaml.py experiments/configs/m4_trend_branch_redundancy.yaml
+# ============================================================
+
+experiment_name: m4_trend_branch_redundancy
+category: basis_completeness
+description: >
+  Drops the polynomial trend branch from the unified TrendWavelet block at both
+  the default and the complete backcast width, at matched trunk width and
+  matched parameter count, to test whether the branch is inert or actively
+  interferes once the wavelet basis spans the output space.
+
+dataset: m4
+periods:
+  - Yearly
+  - Quarterly
+  - Monthly
+  - Weekly
+  - Daily
+  - Hourly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Yearly: 1.5
+    Quarterly: 1.5
+    Monthly: 10
+    Weekly: 10
+    Daily: 10
+    Hourly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5       # L = 5H in every period
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  wavelet_type: db3
+  g_width: 256                 # match TrendWavelet's t_width, NOT the 512 default
+  basis_dim: eq_fcast
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - trend_branch
+  - basis_regime
+  - backcast_coverage_pct
+  - trunk_width
+  - n_stacks
+
+configs:
+  # ── No trend branch, backcast at the repo default 20% ─────────────────────
+  - name: W_10s_bd_eqfcast
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {basis_dim: eq_fcast}
+    extra_fields: {trend_branch: 0, basis_regime: forecast_complete_only, backcast_coverage_pct: 20, trunk_width: 256, n_stacks: 10}
+
+  # ── No trend branch, backcast complete, forecast still complete and pinned ─
+  - name: W_10s_bd_eqbcast
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {basis_dim: eq_bcast, forecast_basis_dim: eq_fcast}
+    extra_fields: {trend_branch: 0, basis_regime: both_complete, backcast_coverage_pct: 100, trunk_width: 256, n_stacks: 10}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_trend_branch_redundancy_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true

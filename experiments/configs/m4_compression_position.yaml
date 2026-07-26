@@ -1,0 +1,148 @@
+# ============================================================
+# M4 Compression-Position Study — does WHERE you compress matter?
+#
+# Hypothesis (residual-decay account of over-parameterisation):
+# in a doubly-residual stack, block l receives x - sum_{k<l} xhat_k, so later
+# blocks see progressively smaller residuals and carry proportionally less
+# signal. If the AE bottleneck helps by removing capacity that was not being
+# used, then compressing LATE stacks should cost less than compressing EARLY
+# stacks -- at identical depth and near-identical parameter count.
+#
+# This is the forecasting statement of the LLM observation that replacing the
+# MLPs of the last two transformer layers hurts far less than replacing all of
+# them. Unlike the LLM version it is cheap, and unlike the fine-tuning results
+# it carries no compute-matched-control confound: every arm here is trained
+# from scratch under one recipe.
+#
+# Design: 10 stacks, alternating Trend/Wavelet content held fixed; only the
+# BACKBONE of each position varies (RootBlock = uncompressed, AE = bottleneck).
+#
+#   allRB     10 x RootBlock                     (no compression, upper ref)
+#   allAE     10 x AE                            (full compression, lower ref)
+#   earlyAE   AE x4 then RootBlock x6            (compress the first stacks)
+#   lateAE    RootBlock x6 then AE x4            (compress the last stacks)
+#
+# earlyAE and lateAE contain exactly the same multiset of blocks, so they are
+# parameter-identical to each other by construction; the ONLY difference is
+# position. That pair is the experiment. allRB/allAE bracket the range.
+#
+# PREDICTION: lateAE ~ allRB  >>  earlyAE, and lateAE > earlyAE significantly.
+# FALSIFIED IF: earlyAE ~ lateAE (position irrelevant -> compression is plain
+# capacity reduction, and the residual-decay account is wrong).
+#
+# Wavelet family fixed at db3: family and filter length are well-powered nulls.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_compression_position.yaml --dry-run
+#   python experiments/run_from_yaml.py experiments/configs/m4_compression_position.yaml
+# ============================================================
+
+experiment_name: m4_compression_position
+category: compression_position
+description: >
+  Tests whether the cost of an AE bottleneck depends on its position in the
+  doubly-residual stack. earlyAE and lateAE hold the block multiset fixed and
+  vary only ordering, so any difference is positional. Brackets: allRB, allAE.
+
+dataset: m4
+periods:
+  - Yearly
+  - Quarterly
+  - Monthly
+  - Weekly
+  - Daily
+  - Hourly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Yearly: 1.5
+    Quarterly: 1.5
+    Monthly: 10
+    Weekly: 10
+    Daily: 10
+    Hourly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  trend_thetas_dim: 3
+  basis_dim: eq_fcast
+  wavelet_type: db3
+  latent_dim: 32
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - compression_position
+  - n_compressed_stacks
+  - n_stacks
+
+configs:
+  # ── Brackets ────────────────────────────────────────────────────────────
+  - name: allRB_10s
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    extra_fields: {compression_position: none, n_compressed_stacks: 0, n_stacks: 10}
+
+  - name: allAE_10s
+    stacks: {type: alternating, blocks: [TrendAE, WaveletV3AE], repeats: 5}
+    extra_fields: {compression_position: all, n_compressed_stacks: 10, n_stacks: 10}
+
+  # ── The experiment: same multiset of blocks, different order ────────────
+  - name: earlyAE_10s
+    stacks:
+      type: explicit
+      blocks: [TrendAE, WaveletV3AE, TrendAE, WaveletV3AE,
+               Trend, WaveletV3, Trend, WaveletV3, Trend, WaveletV3]
+    extra_fields: {compression_position: early, n_compressed_stacks: 4, n_stacks: 10}
+
+  - name: lateAE_10s
+    stacks:
+      type: explicit
+      blocks: [Trend, WaveletV3, Trend, WaveletV3, Trend, WaveletV3,
+               TrendAE, WaveletV3AE, TrendAE, WaveletV3AE]
+    extra_fields: {compression_position: late, n_compressed_stacks: 4, n_stacks: 10}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_compression_position_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
