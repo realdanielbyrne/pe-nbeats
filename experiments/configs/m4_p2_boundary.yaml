@@ -1,0 +1,199 @@
+# ============================================================
+# The completeness argument, tested at its boundary
+#
+# THE ARGUMENT. At complete forecast rank the frozen basis B_f is square and
+# orthogonal, hence invertible, so for any unconstrained head M there is a W_f
+# with B_f^T W_f = M. The block's forecast map is then EXACTLY the standard
+# N-BEATS head in rotated coordinates, and basis identity cannot change what the
+# model represents. That is why basis identity measures null on M4: 36 paired
+# comparisons in m4_basis_identity_control, none significant, min p = 0.084.
+#
+# WHAT THE ARGUMENT ACTUALLY REQUIRES. Not merely "no nonlinearity anywhere". It
+# requires that no nonlinearity sit BETWEEN the learned projection and the
+# frozen basis, because the rotation has to be absorbed by W_f before anything
+# else acts on it. Placement is everything, and this config tests exactly that:
+#
+#   condition     forecast map          rotation absorbed?   identity null?
+#   -----------   -------------------   ------------------   --------------
+#   plain         B^T W h               yes, by W            YES
+#   active_g      sigma(B^T W h)        yes, by W            YES  <- still
+#   theta_act     B^T sigma(W h)        NO                   NO   <- breaks
+#
+# active_g is the interesting case and I had it wrong in an earlier draft. It
+# applies its activation AFTER the basis, so sigma(B^T W h) still realises any
+# sigma(M h) and the argument survives untouched. Only interposing the
+# nonlinearity breaks it: a rotation of a rectified vector is generally not
+# itself a rectified vector, so the reachable set starts to depend on B.
+#
+# theta_activation is a DIAGNOSTIC PROBE, not a proposed variant. It exists only
+# to falsify the argument, and it is parameter-identical to its plain twin.
+#
+# PREDICTION, REGISTERED BEFORE TRAINING.
+#   * plain and active_g: basis identity null in both, and null to a similar
+#     degree, since the same absorption argument covers both.
+#   * theta_act: basis identity becomes significant, and the ordering should
+#     start tracking captured energy the way the truncated regime does
+#     (DCT best, wavelet worst).
+#
+# FALSIFIED IF: identity is null under theta_act too. Then the null has some
+# broader cause than completeness, the derivation does not localise it, and
+# Proposition 2 is not doing the work I claim. Equally falsified if identity
+# becomes significant under active_g, which would mean I have misread where the
+# activation sits.
+#
+# Pure WaveletV3 is used so forecast rank is EXACTLY forecast_basis_dim, with no
+# trend rows silently added. g_width 256 matches TrendWavelet's t_width.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_p2_boundary.yaml --dry-run
+#   python experiments/run_from_yaml.py experiments/configs/m4_p2_boundary.yaml
+# ============================================================
+
+experiment_name: m4_p2_boundary
+category: basis_identity
+description: >
+  Boundary test for the completeness argument. Basis identity is contrasted at
+  COMPLETE forecast rank under three placements of the nonlinearity: none,
+  after the basis (active_g), and between the projection and the basis
+  (theta_activation). The argument predicts a null in the first two and a break
+  in the third.
+
+dataset: m4
+periods:
+  - Hourly
+  - Monthly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Hourly: 10
+    Monthly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  g_width: 256
+  basis_dim: eq_fcast          # backcast rank pinned
+  forecast_basis_dim: eq_fcast # forecast basis COMPLETE: d_f = H, the regime
+                               # every M4 configuration in the paper occupies
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - basis_kind
+  - basis_is_wavelet
+  - nonlinearity_placement
+  - p2_predicts_null
+
+configs:
+  # ── A. plain: no nonlinearity on either side of the basis ──────────────────
+  - name: W_10s_cmpl_db3_plain
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: "db3"}
+    extra_fields: {basis_kind: db3, basis_is_wavelet: true, nonlinearity_placement: none, p2_predicts_null: true}
+
+  - name: W_10s_cmpl_dct_plain
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: "dct"}
+    extra_fields: {basis_kind: dct, basis_is_wavelet: false, nonlinearity_placement: none, p2_predicts_null: true}
+
+  - name: W_10s_cmpl_randortho0_plain
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: "random_ortho"}
+    extra_fields: {basis_kind: random_ortho, basis_is_wavelet: false, nonlinearity_placement: none, p2_predicts_null: true}
+
+  - name: W_10s_cmpl_randortho7_plain
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: "random_ortho:7"}
+    extra_fields: {basis_kind: random_ortho_7, basis_is_wavelet: false, nonlinearity_placement: none, p2_predicts_null: true}
+
+  # ── B. active_g: nonlinearity AFTER the basis — argument should survive ────
+  - name: W_10s_cmpl_db3_agf
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    training: {active_g: forecast}
+    block_params: {wavelet_type: "db3"}
+    extra_fields: {basis_kind: db3, basis_is_wavelet: true, nonlinearity_placement: after_basis, p2_predicts_null: true}
+
+  - name: W_10s_cmpl_dct_agf
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    training: {active_g: forecast}
+    block_params: {wavelet_type: "dct"}
+    extra_fields: {basis_kind: dct, basis_is_wavelet: false, nonlinearity_placement: after_basis, p2_predicts_null: true}
+
+  - name: W_10s_cmpl_randortho0_agf
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    training: {active_g: forecast}
+    block_params: {wavelet_type: "random_ortho"}
+    extra_fields: {basis_kind: random_ortho, basis_is_wavelet: false, nonlinearity_placement: after_basis, p2_predicts_null: true}
+
+  - name: W_10s_cmpl_randortho7_agf
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    training: {active_g: forecast}
+    block_params: {wavelet_type: "random_ortho:7"}
+    extra_fields: {basis_kind: random_ortho_7, basis_is_wavelet: false, nonlinearity_placement: after_basis, p2_predicts_null: true}
+
+  # ── C. theta_activation: nonlinearity BETWEEN projection and basis —────────
+  #      the one placement that breaks the argument
+  - name: W_10s_cmpl_db3_tact
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: "db3", theta_activation: true}
+    extra_fields: {basis_kind: db3, basis_is_wavelet: true, nonlinearity_placement: between, p2_predicts_null: false}
+
+  - name: W_10s_cmpl_dct_tact
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: "dct", theta_activation: true}
+    extra_fields: {basis_kind: dct, basis_is_wavelet: false, nonlinearity_placement: between, p2_predicts_null: false}
+
+  - name: W_10s_cmpl_randortho0_tact
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: "random_ortho", theta_activation: true}
+    extra_fields: {basis_kind: random_ortho, basis_is_wavelet: false, nonlinearity_placement: between, p2_predicts_null: false}
+
+  - name: W_10s_cmpl_randortho7_tact
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: "random_ortho:7", theta_activation: true}
+    extra_fields: {basis_kind: random_ortho_7, basis_is_wavelet: false, nonlinearity_placement: between, p2_predicts_null: false}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_p2_boundary_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true

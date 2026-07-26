@@ -1,0 +1,146 @@
+# ============================================================
+# Traffic-96 — basis identity at TRUNCATED forecast rank
+#
+# WHY TRAFFIC AND NOT M4. The linear-approximation account (Propositions 1 and 5)
+# says a frozen basis is judged by how much of the target ensemble's energy its
+# retained rows span, and that the optimum for a fixed subspace is the
+# Karhunen-Loeve basis, with the DCT close behind for slowly decaying stationary
+# covariance. On M4 that account is confirmed but DEGENERATE: unnormalised M4
+# windows are dominated by their DC component, so every basis holding a constant
+# row sits at the capture ceiling. Training-free capture at d/m = 1/3 gives
+# KL 1.0000 and DCT 1.0000 on Hourly, KL 0.9945 and DCT 0.9943 on Monthly. There
+# is no room for the predicted optimum to separate from its approximation.
+#
+# Traffic is the non-degenerate case. PeMS occupancy is already bounded in 0-1
+# with real structure beyond its mean, so the leading eigenvector carries only
+# 0.6134 of the energy rather than 0.98. At d/m = 32/96 the training-free
+# predictions separate cleanly:
+#
+#     KL 0.9714   DCT 0.9630   random 0.3721 / 0.3258   coif2 0.3035
+#
+# PREDICTION, REGISTERED BEFORE TRAINING. Test MSE should order inversely to
+# captured energy, KL best, then DCT, then the two random draws, with the
+# wavelet last. This is the sharpest form of the claim available: the theory
+# names a specific winner in advance, on a dataset, protocol and loss different
+# from the ones the account was built on.
+#
+# FALSIFIED IF: the wavelet wins, or the ordering does not track captured
+# energy. Either outcome would mean the subspace geometry is not what governs
+# trained accuracy at truncated rank, which is Proposition 1's core claim.
+#
+# Pure WaveletV3 is used rather than TrendWavelet so forecast rank is EXACTLY
+# forecast_basis_dim; a trend branch would silently add rows and blur the
+# contrast. g_width 256 matches TrendWavelet's t_width so the trunk is not a
+# confound. Backcast rank is pinned at 96 in every arm, so all variation is on
+# the output path.
+#
+# Prerequisite (paths relative to the repository root):
+#   python experiments/scripts/build_kl_basis.py --dataset traffic \
+#       --period Traffic-96 --forecast-multiplier 5 --train-ratio 0.7 \
+#       --include-target --out experiments/bases/traffic96
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/traffic96_truncated_identity.yaml --dry-run
+#   python experiments/run_from_yaml.py experiments/configs/traffic96_truncated_identity.yaml
+# ============================================================
+
+experiment_name: traffic96_truncated_identity
+category: basis_identity
+description: >
+  Frozen-basis identity contrast on Traffic-96 at forecast rank 32 of 96, with
+  the backcast basis pinned and parameter counts identical across arms. Includes
+  the Karhunen-Loeve optimum, which linear approximation theory names as the best
+  possible fixed subspace, against DCT, two random orthonormal draws and a coif2
+  wavelet.
+
+dataset: traffic
+periods:
+  - Traffic-96
+
+protocol:
+  datamodule: columnar
+  sampling_style: sliding
+  normalize: false              # PeMS occupancy is already 0-1
+  train_ratio: 0.7
+  val_ratio: 0.1
+  include_target: true
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_epochs: 100
+  patience: 10
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: MSELoss                 # Traffic's reported metric, as in every L=480
+                                # Traffic study in the repo
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5        # L = 480 = 5H; MANDATORY on Traffic
+  batch_size: 1024
+
+lr_scheduler: null              # constant LR, matching the reference cell
+
+block_params:
+  g_width: 256                  # match TrendWavelet's t_width, not the 512 default
+  basis_dim: eq_fcast           # backcast rank PINNED at 96 x 480 in every arm
+  basis_offset: 0
+
+runs:
+  n_runs: 5
+  seed_mode: sequential
+  base_seed: 42                 # seed-matched across arms so tests can be paired
+
+extra_csv_columns:
+  - forecast_basis_dim_cfg
+  - forecast_coverage_pct
+  - basis_kind
+  - basis_is_wavelet
+  - predicted_capture_train
+  - trunk_width
+
+configs:
+  - name: W_10s_fbd32_kl
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 32, wavelet_type: "kl:experiments/bases/traffic96"}
+    extra_fields: {forecast_basis_dim_cfg: 32, forecast_coverage_pct: 33.3, basis_kind: kl, basis_is_wavelet: false, predicted_capture_train: 0.9714, trunk_width: 256}
+
+  - name: W_10s_fbd32_dct
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 32, wavelet_type: "dct"}
+    extra_fields: {forecast_basis_dim_cfg: 32, forecast_coverage_pct: 33.3, basis_kind: dct, basis_is_wavelet: false, predicted_capture_train: 0.9630, trunk_width: 256}
+
+  - name: W_10s_fbd32_randortho0
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 32, wavelet_type: "random_ortho"}
+    extra_fields: {forecast_basis_dim_cfg: 32, forecast_coverage_pct: 33.3, basis_kind: random_ortho, basis_is_wavelet: false, predicted_capture_train: 0.3258, trunk_width: 256}
+
+  - name: W_10s_fbd32_randortho7
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 32, wavelet_type: "random_ortho:7"}
+    extra_fields: {forecast_basis_dim_cfg: 32, forecast_coverage_pct: 33.3, basis_kind: random_ortho_7, basis_is_wavelet: false, predicted_capture_train: 0.3721, trunk_width: 256}
+
+  - name: W_10s_fbd32_coif2
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {forecast_basis_dim: 32, wavelet_type: "coif2"}
+    extra_fields: {forecast_basis_dim_cfg: 32, forecast_coverage_pct: 33.3, basis_kind: coif2, basis_is_wavelet: true, predicted_capture_train: 0.3035, trunk_width: 256}
+
+output:
+  results_dir: experiments/results
+  csv_filename: traffic96_truncated_identity_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true

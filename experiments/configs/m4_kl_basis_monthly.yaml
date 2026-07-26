@@ -1,0 +1,140 @@
+# ============================================================
+# M4-Monthly — the Karhunen-Loeve arm at truncated forecast rank
+#
+# WHAT THIS TESTS. Proposition 5 says the frozen bases in this repository do
+# LINEAR approximation: the retained rows are fixed when the model is built and
+# shared by every series, so which rows are kept never adapts to the signal. In
+# linear approximation the optimal fixed d-dimensional subspace is not a wavelet
+# and not a DCT. It is the Karhunen-Loeve basis, the leading eigenvectors of the
+# ensemble second-moment matrix, which maximises expected captured energy by
+# construction. The DCT is only asymptotically equivalent to it, for series with
+# slowly decaying approximately stationary covariance.
+#
+# This arm builds that optimum and races it against the bases already measured.
+# It is the sharpest available test of the account, because the theory names a
+# specific winner in advance rather than merely explaining a past result.
+#
+# THE PREDICTION IS A TIE, AND THAT IS THE POINT. Captured energy computed with
+# no training at all (experiments/scripts/capture_prediction.py) gives, at
+# d/m = 6/18:
+#
+#     KL 0.9945   DCT 0.9943   random 0.4803 / 0.1490   db3 0.1497
+#
+# Unnormalised M4 windows are dominated by their DC component, so any basis
+# holding a constant row is already at the capture ceiling and KL has no room to
+# win. Theory therefore predicts KL ties DCT here and beats it only where the
+# ensemble has real structure beyond DC. Traffic-96 is that case and is tested
+# separately in traffic96_truncated_identity.yaml, where the training-free gap
+# is KL 0.9714 against DCT 0.9630.
+#
+# FALSIFIED IF: KL loses to DCT by more than seed noise. The KL basis maximises
+# captured energy by construction, so a real loss would mean captured energy is
+# not what governs trained accuracy, which is Proposition 1's core claim.
+#
+# The KL basis is estimated from the TRAINING split only, so it is data
+# dependent in a way db3, DCT and the random draws are not. It is still linear
+# approximation in the technical sense, since the rows are fixed before training
+# begins and shared by every series. The paper must state this openly.
+#
+# Prerequisite (paths are relative to the repository root):
+#   python experiments/scripts/build_kl_basis.py --dataset m4 --period Hourly \
+#       --forecast-multiplier 5 --out experiments/bases/m4_monthly
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_kl_basis_monthly.yaml --dry-run
+#   python experiments/run_from_yaml.py experiments/configs/m4_kl_basis_monthly.yaml
+# ============================================================
+
+experiment_name: m4_kl_basis_monthly
+category: basis_identity
+description: >
+  Karhunen-Loeve basis arm on M4-Monthly at forecast rank 6 of 18, matched in
+  architecture, protocol, parameter count and seeds to the db3, DCT and random
+  orthonormal arms of m4_truncated_identity. Tests whether the basis that linear
+  approximation theory names as optimal actually wins at truncated rank.
+
+dataset: m4
+periods:
+  - Monthly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Monthly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5       # L = 90
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  g_width: 256                 # match TrendWavelet's t_width, not the 512 default
+  basis_dim: eq_fcast          # backcast basis PINNED at 18 x 90, as in every
+                               # arm of m4_truncated_identity
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42                # identical seeds to the arms being compared
+
+extra_csv_columns:
+  - forecast_basis_dim_cfg
+  - forecast_coverage_pct
+  - trunk_width
+  - n_stacks
+  - basis_kind
+  - predicted_capture
+
+configs:
+  # Both paths use KL: the backcast basis loads m4_monthly_90.npy and the
+  # forecast basis m4_monthly_18.npy, keyed by target length.
+  - name: W_10s_fbd6_kl
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params:
+      forecast_basis_dim: 6
+      wavelet_type: "kl:experiments/bases/m4_monthly"
+    extra_fields:
+      forecast_basis_dim_cfg: 6
+      forecast_coverage_pct: 33.3
+      trunk_width: 256
+      n_stacks: 10
+      basis_kind: kl
+      predicted_capture: 0.9945
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_kl_basis_monthly_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
