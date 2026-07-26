@@ -2,6 +2,7 @@
 import warnings
 
 import lightningnbeats
+import numpy as np
 import pytest
 import torch
 from torch import nn
@@ -1274,5 +1275,59 @@ class TestControlBases:
             p.numel() for p in wav.parameters()
         )
         backcast, forecast = ctl(torch.randn(4, 30))
+        assert backcast.shape == (4, 30)
+        assert forecast.shape == (4, 6)
+
+
+class TestKLBasis:
+    """Precomputed Karhunen-Loeve basis, the optimum linear approximation theory
+    names for a fixed d-dimensional subspace."""
+
+    @staticmethod
+    def _write(tmp_path, m, seed=3):
+        rng = np.random.default_rng(seed)
+        q, r = np.linalg.qr(rng.standard_normal((m, m)))
+        basis = (q * np.sign(np.diag(r))).T
+        prefix = str(tmp_path / "kl")
+        np.save(f"{prefix}_{m}.npy", basis)
+        return prefix, basis
+
+    def test_loads_and_truncates(self, tmp_path):
+        prefix, basis = self._write(tmp_path, 32)
+        got = b._WaveletGeneratorV3._build_basis(32, f"kl:{prefix}", 5, 8)
+        assert got.shape == (8, 32)
+        assert np.allclose(got.numpy(), basis[:8], atol=1e-6)
+
+    def test_rows_are_orthonormal(self, tmp_path):
+        prefix, _ = self._write(tmp_path, 24)
+        got = b._WaveletGeneratorV3._build_basis(24, f"kl:{prefix}", 5, 10)
+        assert torch.allclose(got @ got.T, torch.eye(10), atol=1e-4)
+
+    def test_shape_matches_wavelet_path(self, tmp_path):
+        prefix, _ = self._write(tmp_path, 48)
+        wav = b._WaveletGeneratorV3._build_basis(48, "db3", 5, 16)
+        kl = b._WaveletGeneratorV3._build_basis(48, f"kl:{prefix}", 5, 16)
+        assert kl.shape == wav.shape
+
+    def test_missing_file_is_a_clear_error(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="Precompute it"):
+            b._WaveletGeneratorV3._build_basis(16, f"kl:{tmp_path}/absent", 5, 4)
+
+    def test_wrong_shape_is_rejected(self, tmp_path):
+        # Right filename for target_length=16, wrong contents (32x32).
+        rng = np.random.default_rng(5)
+        np.save(str(tmp_path / "kl_16.npy"), rng.standard_normal((32, 32)))
+        with pytest.raises(ValueError, match="expected"):
+            b._WaveletGeneratorV3._build_basis(16, f"kl:{tmp_path}/kl", 5, 4)
+
+    def test_block_param_parity_with_wavelet(self, tmp_path):
+        prefix, _ = self._write(tmp_path, 30)
+        self._write(tmp_path, 6)
+        wav = b.TrendWavelet(256, 30, 6, wavelet_dim=6, wavelet_type="db3")
+        kl = b.TrendWavelet(256, 30, 6, wavelet_dim=6, wavelet_type=f"kl:{prefix}")
+        assert sum(p.numel() for p in kl.parameters()) == sum(
+            p.numel() for p in wav.parameters()
+        )
+        backcast, forecast = kl(torch.randn(4, 30))
         assert backcast.shape == (4, 30)
         assert forecast.shape == (4, 6)

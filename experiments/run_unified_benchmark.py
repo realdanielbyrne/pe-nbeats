@@ -1074,6 +1074,7 @@ def run_single_experiment(
     generic_dim=5,  # Learned generic branch rank for TrendWaveletGeneric* blocks
     t_width=256,  # Hidden layer width for Trend/TrendWavelet-family blocks
     g_width=512,  # Hidden layer width for Generic/pure-wavelet-family blocks
+    theta_activation=False,  # Diagnostic probe: nonlinearity BETWEEN projection and basis
     kl_weight=0.1,  # KL divergence loss weight for VAE-family blocks
     sampling_style="sliding",  # "sliding" | "nhits_paper" | "nbeats_paper"
     steps_per_epoch=None,  # required when sampling_style in ("nhits_paper","nbeats_paper")
@@ -1232,6 +1233,7 @@ def run_single_experiment(
             skip_alpha=skip_alpha,
             t_width=t_width,
             g_width=g_width,
+            theta_activation=theta_activation,
             kl_weight=kl_weight,
         )
 

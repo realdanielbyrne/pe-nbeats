@@ -303,6 +303,7 @@ class NBeatsNet(_NBeatsBase):
         basis_offset: int = 0,
         stack_basis_offsets: list = None,
         forecast_basis_dim: int = None,
+        theta_activation: bool = False,
         wavelet_type: str = "db3",
         backcast_wavelet_type: str = None,
         forecast_wavelet_type: str = None,
@@ -516,6 +517,7 @@ class NBeatsNet(_NBeatsBase):
         self.basis_offset = basis_offset
         self.stack_basis_offsets = stack_basis_offsets
         self.forecast_basis_dim = forecast_basis_dim
+        self.theta_activation = theta_activation
         self.wavelet_type = wavelet_type
         self.backcast_wavelet_type = backcast_wavelet_type
         self.forecast_wavelet_type = forecast_wavelet_type
@@ -759,6 +761,10 @@ class NBeatsNet(_NBeatsBase):
                             backcast_wavelet_type=self.backcast_wavelet_type,
                             forecast_wavelet_type=self.forecast_wavelet_type,
                         )
+                        if stack_type == "WaveletV3":
+                            # Diagnostic probe for the completeness argument;
+                            # only the plain WaveletV3 base class accepts it.
+                            _wavelet_kwargs["theta_activation"] = self.theta_activation
                     if any(token in stack_type for token in ("V3VAE", "V3AE")):
                         if "AELG" in stack_type:
                             _wavelet_kwargs["latent_gate_fn"] = self.latent_gate_fn
@@ -974,6 +980,7 @@ class NHiTSNet(_NBeatsBase):
         basis_offset: int = 0,
         stack_basis_offsets: list = None,
         forecast_basis_dim: int = None,
+        theta_activation: bool = False,
         wavelet_type: str = "db3",
         backcast_wavelet_type: str = None,
         forecast_wavelet_type: str = None,
@@ -1075,6 +1082,7 @@ class NHiTSNet(_NBeatsBase):
         self.basis_offset = basis_offset
         self.stack_basis_offsets = stack_basis_offsets
         self.forecast_basis_dim = forecast_basis_dim
+        self.theta_activation = theta_activation
         self.wavelet_type = wavelet_type
         self.backcast_wavelet_type = backcast_wavelet_type
         self.forecast_wavelet_type = forecast_wavelet_type
@@ -1342,6 +1350,10 @@ class NHiTSNet(_NBeatsBase):
                             backcast_wavelet_type=self.backcast_wavelet_type,
                             forecast_wavelet_type=self.forecast_wavelet_type,
                         )
+                        if stack_type == "WaveletV3":
+                            # Diagnostic probe for the completeness argument;
+                            # only the plain WaveletV3 base class accepts it.
+                            _wavelet_kwargs["theta_activation"] = self.theta_activation
                     if any(token in stack_type for token in ("V3VAE", "V3AE")):
                         if "AELG" in stack_type:
                             _wavelet_kwargs["latent_gate_fn"] = self.latent_gate_fn

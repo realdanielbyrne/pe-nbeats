@@ -1,3 +1,4 @@
+import os
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -2642,11 +2643,36 @@ class _WaveletGeneratorV3(nn.Module):
         (effective_dim, target_length) shape as the wavelet path, so a control run is
         parameter-identical to its wavelet counterpart by construction.
 
-        ``kind`` is either ``'dct'`` (orthonormal DCT-II rows, ordered low to high
-        frequency) or ``'random_ortho'`` / ``'random_ortho:<seed>'`` (rows of a
-        Haar-distributed random orthonormal matrix, deterministic given the seed).
+        ``kind`` is one of:
+
+        * ``'dct'`` — orthonormal DCT-II rows, ordered low to high frequency.
+        * ``'random_ortho'`` / ``'random_ortho:<seed>'`` — rows of a
+          Haar-distributed random orthonormal matrix, deterministic given the seed.
+        * ``'kl:<prefix>'`` — a precomputed Karhunen-Loeve (PCA) basis loaded from
+          ``{prefix}_{target_length}.npy``, rows ordered by descending eigenvalue.
+          This is the basis linear approximation theory names as optimal for a
+          fixed d-dimensional subspace: it maximises expected captured energy for
+          the ensemble it was estimated on. Unlike the other kinds it is
+          data-dependent, estimated from the TRAINING split only. It is still
+          linear approximation in the technical sense, since the rows are fixed
+          before training and shared by every series.
         """
-        if kind == "dct":
+        if kind.startswith("kl:"):
+            prefix = kind.split(":", 1)[1]
+            path = f"{prefix}_{target_length}.npy"
+            if not os.path.exists(path):
+                raise FileNotFoundError(
+                    f"KL basis not found at {path}. Precompute it from the training "
+                    f"split with experiments/scripts/build_kl_basis.py before "
+                    f"running this config."
+                )
+            ortho = np.load(path)
+            if ortho.shape != (target_length, target_length):
+                raise ValueError(
+                    f"KL basis at {path} has shape {ortho.shape}, expected "
+                    f"({target_length}, {target_length})."
+                )
+        elif kind == "dct":
             n = np.arange(target_length, dtype=np.float64)
             k = np.arange(target_length, dtype=np.float64)[:, None]
             ortho = np.cos(np.pi * (n + 0.5) * k / target_length)
@@ -2675,7 +2701,11 @@ class _WaveletGeneratorV3(nn.Module):
     ):
         import logging
 
-        if wavelet_type == "dct" or wavelet_type.startswith("random_ortho"):
+        if (
+            wavelet_type == "dct"
+            or wavelet_type.startswith("random_ortho")
+            or wavelet_type.startswith("kl:")
+        ):
             return _WaveletGeneratorV3._build_control_basis(
                 target_length, wavelet_type, basis_dim, basis_offset
             )
@@ -2746,13 +2776,34 @@ class WaveletV3(RootBlock):
         forecast_basis_dim=None,
         backcast_wavelet_type=None,
         forecast_wavelet_type=None,
+        theta_activation: bool = False,
     ):
+        """
+        theta_activation : bool, optional
+            Diagnostic probe, NOT part of the proposed method. Applies the block
+            activation to the theta vector BETWEEN the learned projection and the
+            frozen basis, giving ``B^T sigma(W h)`` instead of ``B^T W h``.
+
+            This is the one placement that breaks the rotation-absorption
+            argument. At complete rank the frozen basis is square and orthogonal,
+            so ``B^T W`` realises any matrix and basis identity cannot matter;
+            note that ``active_g`` does NOT disturb this, because it applies its
+            activation AFTER the basis, leaving ``sigma(B^T W h)`` free to
+            realise any ``sigma(M h)``. Interposing the nonlinearity instead
+            makes the reachable set depend on the basis, since a rotation of a
+            rectified vector is generally not itself a rectified vector.
+
+            So this flag is the falsification handle: with it off, basis identity
+            must be null at complete rank; with it on, identity should start to
+            matter. Default False.
+        """
         super(WaveletV3, self).__init__(backcast_length, units, activation)
         self.wavelet_type = wavelet_type
         self.backcast_wavelet_type = backcast_wavelet_type
         self.forecast_wavelet_type = forecast_wavelet_type
         self.share_weights = share_weights
         self.active_g = active_g
+        self.theta_activation = theta_activation
 
         # Resolve effective wavelet family per path
         eff_back_wavelet = (
@@ -2798,6 +2849,10 @@ class WaveletV3(RootBlock):
         x = super(WaveletV3, self).forward(x)
         backcast_thetas = self.backcast_linear(x)
         forecast_thetas = self.forecast_linear(x)
+        if self.theta_activation:
+            # Nonlinearity BETWEEN projection and basis; see __init__ docstring.
+            backcast_thetas = self.activation(backcast_thetas)
+            forecast_thetas = self.activation(forecast_thetas)
         backcast = self.backcast_g(backcast_thetas)
         forecast = self.forecast_g(forecast_thetas)
         if self.active_g:

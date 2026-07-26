@@ -137,6 +137,7 @@ DEFAULT_BLOCK_PARAMS = {
     "forecast_wavelet_type": None,
     "t_width": 256,
     "g_width": 512,
+    "theta_activation": False,
 }
 
 DEFAULT_RUNS = {
@@ -983,6 +984,7 @@ def run_single_config(
         generic_dim=int(block_params.get("generic_dim", 5)),
         t_width=int(block_params.get("t_width", 256)),
         g_width=int(block_params.get("g_width", 512)),
+        theta_activation=bool(block_params.get("theta_activation", False)),
         kl_weight=float(block_params.get("kl_weight", 0.1)),
         sampling_style=str(protocol.get("sampling_style", "sliding")),
         steps_per_epoch=protocol.get("steps_per_epoch"),
