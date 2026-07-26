@@ -78,6 +78,14 @@ it: an output activation (27.054 to 9.102, p = 0.002) and a trend branch (9.200 
 control). That both work is the evidence the failure is optimisation. **Proposition 2 guarantees equal
 expressiveness, not equal trainability**, and the paper must say so.
 
+**Monthly replication, summary.** The interposition break repeats decisively, db3 going from 13.91
+under an output activation to 58.82 with the nonlinearity interposed. The after basis null does NOT
+replicate cleanly: KW p = 0.038 across a spread of 0.453 sMAPE, against p = 0.457 and spread 0.133 on
+Hourly. The spread is small in absolute terms and the p value borderline against the number of
+comparisons run, but it is nominally significant and I state the null as firm on Hourly and weak on
+Monthly rather than universal. The linear synthesis cell is not significant on Monthly at all,
+p = 0.236, because the variance there is large for a different reason:
+
 **Monthly replication identifies the failure mode.** There the same cell is bimodal: every basis has
 seeds converging to between 13.3 and 14.7, and only the failure rate differs, 0 of 10 for
 random ortho:7, 1 of 10 for db3, 2 of 10 for random ortho, 4 of 10 for the DCT. On Hourly the DCT
