@@ -94,8 +94,31 @@ probability of converging**, which is exactly what an expressiveness guarantee w
 guarantee predicts, and it is the same bimodal divergence the paper already documents for
 unconstrained linear heads.
 
-Unexplained and recorded as such: interposition reorders the bases, with DCT best at 15.036 while db3
-and the random draws collapse to 44 and 55. Captured energy does not govern that regime.
+### Why interposition reorders the bases, explained
+
+Interposition reorders them: DCT best at 15.036 on Hourly and 14.19 on Monthly, barely worse than its
+own after basis figure of 13.68, while db3 and the random draws collapse to 44 to 59. Captured energy
+does not govern that regime, and here is what does.
+
+Interposing the activation makes `theta` nonnegative, so the block reaches the **conic hull** of the
+basis rows rather than their linear span. A cone can only produce a large positive DC offset if some
+row is itself of one sign, and M4 targets are DC dominated. Computed with no training, best achievable
+relative error under a nonnegativity constraint:
+
+| basis | has a same sign row | conic error | linear error |
+|---|---|---|---|
+| orthonormal DCT | yes | **0.2863** | 0.0000 |
+| Karhunen Loève | yes | **0.2763** | 0.0000 |
+| SVD ordered db3 | no | 0.6907 | 0.0000 |
+| band ordered db3 | no | 0.7106 | 0.0000 |
+| random orthonormal | no | 0.8283 | 0.0000 |
+
+Linear error is zero for every basis, as completeness requires. Conic error separates them, and it
+reproduces the trained interposition ordering: DCT 0.286 best, db3 0.691, random 0.828 worst, against
+measured 15.0, 44.0 and 55.5. **So all three placements are governed by the same principle, the
+geometry of the set the block can reach**: the linear span under linear synthesis, the rectified image
+of that span under an output activation, and the conic hull of the rows under interposition. Each has
+a computable geometry, and in each case that geometry orders the trained outcomes.
 
 ## 4. Spatial coverage, not locality, is what truncation costs a wavelet
 
