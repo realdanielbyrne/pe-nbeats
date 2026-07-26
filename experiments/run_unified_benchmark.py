@@ -1073,6 +1073,7 @@ def run_single_experiment(
     skip_alpha=0.0,  # Mixing weight for skip injection (float or "learnable")
     generic_dim=5,  # Learned generic branch rank for TrendWaveletGeneric* blocks
     t_width=256,  # Hidden layer width for Trend/TrendWavelet-family blocks
+    g_width=512,  # Hidden layer width for Generic/pure-wavelet-family blocks
     kl_weight=0.1,  # KL divergence loss weight for VAE-family blocks
     sampling_style="sliding",  # "sliding" | "nhits_paper" | "nbeats_paper"
     steps_per_epoch=None,  # required when sampling_style in ("nhits_paper","nbeats_paper")
@@ -1230,6 +1231,7 @@ def run_single_experiment(
             skip_distance=skip_distance,
             skip_alpha=skip_alpha,
             t_width=t_width,
+            g_width=g_width,
             kl_weight=kl_weight,
         )
 

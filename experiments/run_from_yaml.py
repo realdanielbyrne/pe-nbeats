@@ -136,6 +136,7 @@ DEFAULT_BLOCK_PARAMS = {
     "backcast_wavelet_type": None,
     "forecast_wavelet_type": None,
     "t_width": 256,
+    "g_width": 512,
 }
 
 DEFAULT_RUNS = {
@@ -720,7 +721,7 @@ def _resolve_forecast_multiplier(training: dict, dataset) -> int:
     return FORECAST_MULTIPLIERS.get(_dataset_key_from_dataset(dataset), 5)
 
 
-def _resolve_basis_dim(raw, dataset) -> int:
+def _resolve_basis_dim(raw, dataset, backcast_length=None) -> int:
     """Resolve basis_dim from YAML value.
 
     Accepts an integer or a string label that resolves at runtime:
@@ -728,6 +729,8 @@ def _resolve_basis_dim(raw, dataset) -> int:
     * ``"forecast"`` / ``"eq_fcast"`` → ``dataset.forecast_length``
     * ``"2*eq_fcast"`` / ``"2x_fcast"`` → ``2 * dataset.forecast_length``
     * ``"lt_fcast"`` → ``max(forecast_length // 2, forecast_length - 2)``
+    * ``"backcast"`` / ``"eq_bcast"`` → ``backcast_length`` (a complete
+      backcast basis; the forecast path clamps to ``forecast_length`` anyway)
 
     This allows a single YAML config to produce the correct basis_dim across
     multiple periods (e.g. M4 Yearly H=6 and Quarterly H=8).
@@ -741,6 +744,17 @@ def _resolve_basis_dim(raw, dataset) -> int:
         if low == "lt_fcast":
             fl = int(dataset.forecast_length)
             return max(fl // 2, fl - 2)
+        if low in ("backcast", "eq_bcast"):
+            if backcast_length is None:
+                raise ValueError(
+                    "basis_dim='eq_bcast' needs the backcast length; the caller "
+                    "must pass backcast_length=forecast_multiplier * forecast_length."
+                )
+            return int(backcast_length)
+        raise ValueError(
+            f"Unrecognised basis_dim label {raw!r}. Expected an int or one of: "
+            "eq_fcast, 2*eq_fcast, lt_fcast, eq_bcast."
+        )
     return int(raw)
 
 
@@ -879,6 +893,14 @@ def run_single_config(
         config.get("lr_scheduler"), effective_max_epochs
     )
     forecast_multiplier = _resolve_forecast_multiplier(training, dataset)
+    # Backcast length for basis_dim labels such as "eq_bcast". Guarded because
+    # some callers pass a lightweight dataset stub without forecast_length; the
+    # resolver only needs this for labels that reference the backcast path.
+    _bl = (
+        forecast_multiplier * dataset.forecast_length
+        if getattr(dataset, "forecast_length", None)
+        else None
+    )
 
     # Extra CSV fields
     extra_row = dict(config.get("extra_fields") or {})
@@ -924,8 +946,18 @@ def run_single_config(
         gpu_id=hardware_cfg.get("gpu_id"),
         dataset_name=dataset_name,
         worker_id=str(hardware_cfg.get("worker_id", "") or ""),
-        basis_dim=_resolve_basis_dim(block_params.get("basis_dim", BASIS_DIM), dataset),
-        forecast_basis_dim=block_params.get("forecast_basis_dim"),
+        basis_dim=_resolve_basis_dim(
+            block_params.get("basis_dim", BASIS_DIM), dataset, backcast_length=_bl
+        ),
+        # Resolved the same way as basis_dim so one config can pin the forecast
+        # path complete across periods with different horizons.
+        forecast_basis_dim=(
+            None
+            if block_params.get("forecast_basis_dim") is None
+            else _resolve_basis_dim(
+                block_params["forecast_basis_dim"], dataset, backcast_length=_bl
+            )
+        ),
         basis_offset=block_params.get("basis_offset", 0),
         stack_basis_offsets=block_params.get("stack_basis_offsets", None),
         extra_row=extra_row if extra_row else None,
@@ -950,6 +982,7 @@ def run_single_config(
         skip_alpha=training.get("skip_alpha", 0.0),
         generic_dim=int(block_params.get("generic_dim", 5)),
         t_width=int(block_params.get("t_width", 256)),
+        g_width=int(block_params.get("g_width", 512)),
         kl_weight=float(block_params.get("kl_weight", 0.1)),
         sampling_style=str(protocol.get("sampling_style", "sliding")),
         steps_per_epoch=protocol.get("steps_per_epoch"),
