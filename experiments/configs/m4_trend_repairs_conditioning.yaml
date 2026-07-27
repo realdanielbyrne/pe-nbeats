@@ -1,0 +1,188 @@
+# ============================================================
+# Does pairing with a Trend block repair the conditioning failure, the way an
+# output rectifier does?
+#
+# THE SETUP. At complete forecast rank, three bases fail under a plain linear
+# synthesis head on M4-Hourly while two others do not, and captured energy is
+# flat to the fourth decimal across all five, so capture explains none of it.
+# The proposed variable is coefficient conditioning, driven by the fact that
+# M4-Hourly windows carry 0.9757 of their energy in the window mean:
+#
+#   basis              dyn range   ag0 sMAPE   seeds converging
+#   DCT                     3126      27.054            0 / 10
+#   KL                      3431      23.472            0 / 10
+#   band ordered db3         668       9.569            9 / 10
+#   SVD db3                   59       9.309           10 / 10
+#   random orthonormal        25       9.333           10 / 10
+#
+# All five of those arms are homogeneous WaveletV3 stacks with NO trend branch.
+#
+# THE HYPOTHESIS. A Trend block spans a low order polynomial including a constant
+# term, so in a doubly residual cascade it absorbs the DC level before the
+# wavelet block ever sees it. If conditioning is the operative variable, then
+# prepending a Trend block should repair exactly what an output rectifier
+# repairs, and by the same mechanism: neither one adds expressiveness, both
+# remove the need for one enormous coefficient.
+#
+# TRAINING FREE EVIDENCE, computed before these runs. Projecting M4-Hourly
+# forecast windows onto the degree 2 Vandermonde subspace a Trend block spans
+# accounts for 0.9788 of forecast energy, and the coefficient statistics of the
+# remainder are transformed:
+#
+#   basis              dyn range raw   dyn range after trend removal   coef 0 share
+#   DCT                        986.6                           116.9   0.8023 -> 0.0000
+#   KL                        3813.5                           366.6   0.9764 -> 0.0003
+#   band ordered db3           667.8                           109.1   0.1597 -> 0.0616
+#
+# Two of the three land near the regime where SVD db3 (59) and random (25)
+# converge on every seed. KL remains three to six times worse conditioned than
+# either, and is therefore the arm to watch.
+#
+# PREDICTIONS, REGISTERED BEFORE THE RUNS.
+#   1. DCT and band ordered db3 paired with Trend converge on 10 of 10 seeds,
+#      up from 0 of 10 and 9 of 10 respectively.
+#   2. KL paired with Trend converges on at least 8 of 10, up from 0 of 10. It
+#      is the marginal case and the one most likely to retain failures.
+#   3. The no-trend 5 stack control does NOT repair anything. DCT and KL still
+#      fail on most seeds there. This separates "a trend branch is present" from
+#      "there are fewer wavelet blocks", and if the control also repairs then
+#      the mechanism is depth rather than trend and this account is wrong.
+#   4. Among the trend paired arms that converge, sMAPE lands within about 0.2
+#      across all three bases, because at complete rank a freely learned
+#      projection absorbs any rotation and basis identity cannot matter once
+#      training succeeds.
+#   5. Band ordered db3 loses to SVD db3 on the MEAN, 9.569 against 9.309, but
+#      its per seed distribution is
+#        8.927 9.036 9.133 9.166 9.171 9.217 9.241 9.282 9.294 13.220
+#      so nine of ten seeds sit in a 0.37 wide band with a median of 9.194,
+#      which already BEATS the SVD arm. The entire deficit is one failed seed.
+#      Prediction: pairing with Trend removes that failure, the mean falls to
+#      roughly 9.15 to 9.25, and band ordered db3 becomes the best ag0 arm of
+#      the five, ahead of SVD db3 at 9.309 and random at 9.333. This is the
+#      cleanest available demonstration that the conditioning penalty is a
+#      failure RATE and not a shifted mean, since removing the cause should
+#      move the mean without moving the converged median.
+#
+# FALSIFIED IF: the trend paired DCT and KL arms still fail. Then removing the
+# DC level is not what repairs conditioning, and the account needs replacing
+# rather than refining.
+#
+# CONTROLS. Identical seeds, protocol, widths and rank to m4_kl_complete and
+# m4_conditioning_ag0, whose arms are the no-trend baseline for this comparison.
+# Parameter counts are NOT matched between the trend paired and homogeneous arms,
+# which is acceptable because the question is convergence rather than ranking.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_trend_repairs_conditioning.yaml
+# ============================================================
+
+experiment_name: m4_trend_repairs_conditioning
+category: basis_identity
+description: >
+  Tests whether prepending a Trend block repairs the complete rank conditioning
+  failure of energy concentrating bases under a plain linear synthesis head, by
+  absorbing the DC level before the frozen basis block sees it.
+
+dataset: m4
+periods:
+  - Hourly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Hourly: 10
+
+training:
+  active_g: false              # ag0 throughout; the whole point is the linear head
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  g_width: 256                 # identical to the no-trend arms being compared
+  t_width: 256
+  trend_thetas_dim: 3          # the degree 2 subspace measured above
+  basis_dim: eq_fcast
+  forecast_basis_dim: eq_fcast # complete forecast rank
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42                # identical seeds to the arms being compared
+
+extra_csv_columns:
+  - basis_kind
+  - trend_paired
+  - dyn_range_raw
+  - dyn_range_detrended
+  - predicted_convergence
+
+configs:
+  # ---- Trend paired: the test ----
+  - name: TW_10s_cmpl_dct_ag0
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    block_params: {wavelet_type: "dct"}
+    extra_fields: {basis_kind: dct, trend_paired: true, dyn_range_raw: 986.6, dyn_range_detrended: 116.9, predicted_convergence: 10}
+
+  - name: TW_10s_cmpl_kl_ag0
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    block_params: {wavelet_type: "kl:experiments/bases/m4_hourly"}
+    extra_fields: {basis_kind: kl, trend_paired: true, dyn_range_raw: 3813.5, dyn_range_detrended: 366.6, predicted_convergence: 8}
+
+  - name: TW_10s_cmpl_db3ordered_ag0
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    block_params: {wavelet_type: "ordered:db3"}
+    extra_fields: {basis_kind: db3ordered, trend_paired: true, dyn_range_raw: 667.8, dyn_range_detrended: 109.1, predicted_convergence: 10}
+
+  # ---- No trend, 5 stacks: separates trend presence from block count ----
+  - name: W_5s_cmpl_dct_ag0
+    stacks: {type: homogeneous, block: WaveletV3, n: 5}
+    block_params: {wavelet_type: "dct"}
+    extra_fields: {basis_kind: dct, trend_paired: false, dyn_range_raw: 986.6, dyn_range_detrended: 986.6, predicted_convergence: 0}
+
+  - name: W_5s_cmpl_kl_ag0
+    stacks: {type: homogeneous, block: WaveletV3, n: 5}
+    block_params: {wavelet_type: "kl:experiments/bases/m4_hourly"}
+    extra_fields: {basis_kind: kl, trend_paired: false, dyn_range_raw: 3813.5, dyn_range_detrended: 3813.5, predicted_convergence: 0}
+
+  - name: W_5s_cmpl_db3ordered_ag0
+    stacks: {type: homogeneous, block: WaveletV3, n: 5}
+    block_params: {wavelet_type: "ordered:db3"}
+    extra_fields: {basis_kind: db3ordered, trend_paired: false, dyn_range_raw: 667.8, dyn_range_detrended: 667.8, predicted_convergence: 9}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_trend_repairs_conditioning_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
