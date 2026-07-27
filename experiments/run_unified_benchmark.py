@@ -90,7 +90,7 @@ from lightning.pytorch import loggers as pl_loggers
 # Allow running from project root or experiments/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from lightningnbeats.models import NBeatsNet
+from lightningnbeats.models import NBeatsNet, DWTPreprocessNBeats
 from lightningnbeats.loaders import (
     ColumnarCollectionTimeSeriesDataModule,
     ColumnarCollectionTimeSeriesTestDataModule,
@@ -1078,6 +1078,9 @@ def run_single_experiment(
     s_width=2048,  # Hidden layer width for Seasonality-family blocks
     ae_width=512,  # Hidden layer width for AutoEncoder-family blocks
     theta_activation=False,  # Diagnostic probe: nonlinearity BETWEEN projection and basis
+    model_type="nbeats",  # "nbeats" | "dwt_preprocess" (Pramanick-style DWT baseline)
+    n_levels=3,  # DWT decomposition depth for model_type="dwt_preprocess"
+    n_blocks_per_band=2,  # Generic blocks per sub-band for "dwt_preprocess"
     kl_weight=0.1,  # KL divergence loss weight for VAE-family blocks
     sampling_style="sliding",  # "sliding" | "nhits_paper" | "nbeats_paper"
     steps_per_epoch=None,  # required when sampling_style in ("nhits_paper","nbeats_paper")
@@ -1204,43 +1207,69 @@ def run_single_experiment(
         effective_latent_dim = (
             latent_dim_override if latent_dim_override is not None else LATENT_DIM
         )
-        model = NBeatsNet(
-            backcast_length=backcast_length,
-            forecast_length=forecast_length,
-            stack_types=stack_types,
-            n_blocks_per_stack=n_blocks_per_stack,
-            share_weights=share_weights,
-            thetas_dim=effective_thetas_dim,
-            loss=loss_override if loss_override is not None else LOSS,
-            active_g=active_g,
-            sum_losses=sum_losses,
-            activation=activation,
-            latent_dim=effective_latent_dim,
-            latent_gate_fn=latent_gate_fn,
-            basis_dim=basis_dim,
-            basis_offset=basis_offset,
-            stack_basis_offsets=stack_basis_offsets,
-            stack_basis_dims=stack_basis_dims,
-            forecast_basis_dim=forecast_basis_dim,
-            trend_thetas_dim=trend_thetas_dim,
-            generic_dim=generic_dim,
-            wavelet_type=wavelet_type,
-            backcast_wavelet_type=backcast_wavelet_type,
-            forecast_wavelet_type=forecast_wavelet_type,
-            learning_rate=(
+        if model_type == "dwt_preprocess":
+            # Pramanick-style baseline: DWT the input, one Generic stack per
+            # sub-band. Shares the protocol, loss, optimizer and schedule with
+            # every other arm so the comparison is like for like.
+            model = DWTPreprocessNBeats(
+                backcast_length=backcast_length,
+                forecast_length=forecast_length,
+                wavelet_type=wavelet_type if wavelet_type else "db3",
+                n_levels=n_levels,
+                n_blocks_per_band=n_blocks_per_band,
+                g_width=g_width,
+                share_weights=share_weights,
+                activation=activation,
+                active_g=active_g,
+                thetas_dim=effective_thetas_dim,
+                loss=loss_override if loss_override is not None else LOSS,
+                sum_losses=sum_losses,
+                learning_rate=(
+                    learning_rate if learning_rate is not None else LEARNING_RATE
+                ),
+                optimizer_name=optimizer_name,
+                no_val=False,
+                lr_scheduler_config=lr_scheduler_config,
+                kl_weight=kl_weight,
+            )
+        else:
+            model = NBeatsNet(
+                backcast_length=backcast_length,
+                forecast_length=forecast_length,
+                stack_types=stack_types,
+                n_blocks_per_stack=n_blocks_per_stack,
+                share_weights=share_weights,
+                thetas_dim=effective_thetas_dim,
+                loss=loss_override if loss_override is not None else LOSS,
+                active_g=active_g,
+                sum_losses=sum_losses,
+                activation=activation,
+                latent_dim=effective_latent_dim,
+                latent_gate_fn=latent_gate_fn,
+                basis_dim=basis_dim,
+                basis_offset=basis_offset,
+                stack_basis_offsets=stack_basis_offsets,
+                stack_basis_dims=stack_basis_dims,
+                forecast_basis_dim=forecast_basis_dim,
+                trend_thetas_dim=trend_thetas_dim,
+                generic_dim=generic_dim,
+                wavelet_type=wavelet_type,
+                backcast_wavelet_type=backcast_wavelet_type,
+                forecast_wavelet_type=forecast_wavelet_type,
+                learning_rate=(
                 learning_rate if learning_rate is not None else LEARNING_RATE
-            ),
-            optimizer_name=optimizer_name,
-            no_val=False,
-            lr_scheduler_config=lr_scheduler_config,
-            skip_distance=skip_distance,
-            skip_alpha=skip_alpha,
-            t_width=t_width,
-            g_width=g_width,
-            s_width=s_width,
-            ae_width=ae_width,
-            theta_activation=theta_activation,
-            kl_weight=kl_weight,
+                ),
+                optimizer_name=optimizer_name,
+                no_val=False,
+                lr_scheduler_config=lr_scheduler_config,
+                skip_distance=skip_distance,
+                skip_alpha=skip_alpha,
+                t_width=t_width,
+                g_width=g_width,
+                s_width=s_width,
+                ae_width=ae_width,
+                theta_activation=theta_activation,
+                kl_weight=kl_weight,
         )
 
         n_params = count_parameters(model)
@@ -1407,7 +1436,10 @@ def run_single_experiment(
         # Load best checkpoint, then delete temp checkpoint directory
         best_path = trainer.checkpoint_callback.best_model_path
         if best_path:
-            model = NBeatsNet.load_from_checkpoint(best_path, weights_only=False)
+            model_cls = (
+                DWTPreprocessNBeats if model_type == "dwt_preprocess" else NBeatsNet
+            )
+            model = model_cls.load_from_checkpoint(best_path, weights_only=False)
         shutil.rmtree(ckpt_tmp_dir, ignore_errors=True)
         epochs_trained = trainer.current_epoch
 

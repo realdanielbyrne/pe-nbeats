@@ -1525,3 +1525,169 @@ class NHiTSNet(_NBeatsBase):
                 x = x + alpha * x_original
 
         return x, y
+
+
+def _mra_projectors(length, wavelet, level, mode="periodization"):
+    """Linear operators that split a signal into its DWT sub-band components.
+
+    A discrete wavelet transform, zeroing every band but one, and the inverse
+    transform are all linear, so extracting sub-band `j` is a fixed `length x
+    length` matrix. Building them once at construction keeps the forward pass a
+    single batched matmul instead of a per-batch call into pywt, and it makes
+    the decomposition exact rather than approximate.
+
+    Returns an array of shape `(n_bands, length, length)` whose sum over the
+    band axis is the identity, so the components reconstruct the input exactly.
+    """
+    import pywt
+
+    probe = pywt.wavedec(np.zeros(length), wavelet, level=level, mode=mode)
+    n_bands = len(probe)
+    projectors = np.zeros((n_bands, length, length), dtype=np.float64)
+
+    for t in range(length):
+        impulse = np.zeros(length)
+        impulse[t] = 1.0
+        coeffs = pywt.wavedec(impulse, wavelet, level=level, mode=mode)
+        for j in range(n_bands):
+            isolated = [np.zeros_like(c) for c in coeffs]
+            isolated[j] = coeffs[j]
+            projectors[j, :, t] = pywt.waverec(isolated, wavelet, mode=mode)[:length]
+
+    reconstruction_error = np.abs(projectors.sum(axis=0) - np.eye(length)).max()
+    if reconstruction_error > 1e-8:
+        raise ValueError(
+            f"MRA projectors do not sum to the identity (max deviation "
+            f"{reconstruction_error:.2e}); the decomposition would lose signal."
+        )
+    return projectors
+
+
+class DWTPreprocessNBeats(_NBeatsBase):
+    """N-BEATS with an external DWT preprocessor, one Generic stack per sub-band.
+
+    This is a reimplementation of the design of Pramanick et al. (2024), which
+    applies a discrete wavelet transform to the input series and trains a
+    separate Generic stack on each resulting sub-band. It exists as a baseline:
+    the contrast against it is external decomposition of the *input* against an
+    in block frozen synthesis basis, which is what this repository implements
+    elsewhere.
+
+    The input of length `L` is split into `level + 1` components that sum back
+    to it exactly. Each component is routed to its own independent stack of
+    Generic blocks carrying the standard doubly residual topology, and the
+    per band forecasts are summed. Because the decomposition is a partition of
+    the signal rather than a transform of it, no inverse transform is needed on
+    the forecast side, and the horizon never has to be given a wavelet
+    structure it does not possess.
+
+    Args:
+        backcast_length (int): Length of the input window, `L`.
+        forecast_length (int): Length of the horizon, `H`.
+        wavelet_type (str): Wavelet family for the decomposition, e.g. `db3`.
+        n_levels (int): Decomposition depth `J`, giving `J + 1` sub-bands.
+            Clamped to `pywt.dwt_max_level` for the given length and family.
+        n_blocks_per_band (int): Generic blocks in each sub-band's stack.
+        g_width (int): Hidden width of the fully connected trunk in each block.
+        share_weights (bool): Share block parameters within a sub-band stack.
+        activation (str): Trunk activation.
+        active_g (bool): Apply an activation to the block's synthesis output.
+    """
+
+    def __init__(
+        self,
+        backcast_length: int,
+        forecast_length: int,
+        wavelet_type: str = "db3",
+        n_levels: int = 3,
+        n_blocks_per_band: int = 2,
+        g_width: int = 512,
+        share_weights: bool = False,
+        activation: str = "ReLU",
+        active_g: bool = False,
+        thetas_dim: int = 5,
+        loss: str = "SMAPELoss",
+        frequency: int = 1,
+        no_val: bool = False,
+        optimizer_name: str = "Adam",
+        learning_rate: float = 1e-3,
+        sum_losses: bool = False,
+        kl_weight: float = 0.001,
+        lr_scheduler_config: dict = None,
+        **unused,
+    ):
+        super(DWTPreprocessNBeats, self).__init__(
+            loss=loss,
+            frequency=frequency,
+            no_val=no_val,
+            optimizer_name=optimizer_name,
+            learning_rate=learning_rate,
+            sum_losses=sum_losses,
+            kl_weight=kl_weight,
+            lr_scheduler_config=lr_scheduler_config,
+        )
+        import pywt
+
+        self.backcast_length = backcast_length
+        self.forecast_length = forecast_length
+        self.wavelet_type = wavelet_type
+        self.g_width = g_width
+        self.t_width = g_width  # reported by the benchmark runner
+
+        max_level = pywt.dwt_max_level(backcast_length, pywt.Wavelet(wavelet_type).dec_len)
+        self.n_levels = int(min(n_levels, max_level))
+        if self.n_levels < 1:
+            raise ValueError(
+                f"backcast_length={backcast_length} admits no DWT level for "
+                f"'{wavelet_type}'; the decomposition would be a no op."
+            )
+
+        projectors = _mra_projectors(backcast_length, wavelet_type, self.n_levels)
+        self.n_bands = projectors.shape[0]
+        self.register_buffer(
+            "band_projectors", torch.tensor(projectors, dtype=torch.float32)
+        )
+
+        # One independent Generic stack per sub-band.
+        self.stacks = nn.ModuleList()
+        for _ in range(self.n_bands):
+            band_stack = nn.ModuleList()
+            for block_idx in range(n_blocks_per_band):
+                if share_weights and block_idx > 0:
+                    band_stack.append(band_stack[0])
+                else:
+                    band_stack.append(
+                        b.Generic(
+                            units=g_width,
+                            backcast_length=backcast_length,
+                            forecast_length=forecast_length,
+                            thetas_dim=thetas_dim,
+                            share_weights=False,
+                            activation=activation,
+                            active_g=active_g,
+                        )
+                    )
+            self.stacks.append(band_stack)
+
+        self.save_hyperparameters()
+
+    def forward(self, x):
+        x = torch.squeeze(x, -1)
+
+        # (batch, L) x (bands, L, L) -> (bands, batch, L); components sum to x.
+        components = torch.einsum("bl,jkl->jbk", x, self.band_projectors)
+
+        forecast = torch.zeros(
+            x.shape[0], self.forecast_length, device=x.device, dtype=x.dtype
+        )
+        residual = torch.zeros_like(x)
+
+        for band_idx in range(self.n_bands):
+            band_residual = components[band_idx]
+            for block in self.stacks[band_idx]:
+                backcast_hat, forecast_hat = block(band_residual)
+                band_residual = band_residual - backcast_hat
+                forecast = forecast + forecast_hat
+            residual = residual + band_residual
+
+        return residual, forecast

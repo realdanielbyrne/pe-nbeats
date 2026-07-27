@@ -140,6 +140,9 @@ DEFAULT_BLOCK_PARAMS = {
     "s_width": 2048,
     "ae_width": 512,
     "theta_activation": False,
+    "model_type": "nbeats",
+    "n_levels": 3,
+    "n_blocks_per_band": 2,
 }
 
 DEFAULT_RUNS = {
@@ -990,6 +993,9 @@ def run_single_config(
         s_width=int(block_params.get("s_width", 2048)),
         ae_width=int(block_params.get("ae_width", 512)),
         theta_activation=bool(block_params.get("theta_activation", False)),
+        model_type=str(block_params.get("model_type", "nbeats")),
+        n_levels=int(block_params.get("n_levels", 3)),
+        n_blocks_per_band=int(block_params.get("n_blocks_per_band", 2)),
         kl_weight=float(block_params.get("kl_weight", 0.1)),
         sampling_style=str(protocol.get("sampling_style", "sliding")),
         steps_per_epoch=protocol.get("steps_per_epoch"),

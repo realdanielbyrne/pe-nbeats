@@ -1,0 +1,193 @@
+# ============================================================
+# Direct comparison against DWT preprocessed N-BEATS, under my protocol.
+#
+# WHY. Three parties asked for this and none of my work contained it: reviewer
+# ovPT Question 1, reviewer K8yb Weakness (i), and the area chair listed it
+# second of five rebuttal considerations. The submission asserted a distinction
+# from Pramanick et al. (2024) rather than demonstrating one, and their own
+# evaluation is on stock market data under a different protocol entirely.
+#
+# THE TWO DESIGNS, stated plainly.
+#   Theirs: decompose the INPUT series with a discrete wavelet transform, then
+#     train a separate Generic stack on each resulting sub-band. The wavelet is
+#     an external preprocessor and the network never sees a wavelet again.
+#   Mine: leave the input alone and replace each block's linear SYNTHESIS head
+#     with a factorisation through a frozen orthonormal basis. The wavelet is
+#     inside the block and there is no preprocessing at all.
+#
+# IMPLEMENTATION, and the fairness measures taken. `DWTPreprocessNBeats` splits
+# the length L input into `level + 1` components that sum back to it exactly, by
+# precomputing the transform, band isolation and inverse as a single fixed L x L
+# matrix per band. Each component gets its own independent stack of Generic
+# blocks carrying the standard doubly residual topology, and the per band
+# forecasts are summed. Reconstruction is exact to float precision, so the
+# decomposition discards nothing.
+#
+#   - Identical protocol, loss, optimizer, learning rate schedule, early
+#     stopping, seeds and evaluation code as every other arm here.
+#   - Swept across three widths rather than pinned at one, so the comparison is
+#     between two frontiers rather than between two hand chosen points. A single
+#     matched point would let a poor width choice decide the outcome.
+#   - db3 for both designs. Their paper does not fix a family, and my own family
+#     test is a well powered null (36 paired comparisons, minimum p = 0.084), so
+#     I do not expect the choice to carry the result. Stated rather than hidden.
+#
+# I am reimplementing a method from its description without the authors' code,
+# which is how unfair baselines get built. The mitigations above are the ones
+# available to me; the result should be read with that caveat attached.
+#
+# PARAMETER MATCHING. Counts are close but not identical, which is why the sweep
+# exists. On Yearly, theirs at width 256 is 1,287,168 against mine at width 128
+# on 1,309,470, a 1.7 percent gap; at width 512, 4,933,632 against 5,084,190, a
+# 3.0 percent gap. On Monthly theirs at width 512 is 8,898,560 and the Generic
+# baseline is 8,898,560 exactly. Band counts differ by period because the
+# admissible decomposition depth does: 3 bands on Yearly, 5 on Monthly, 6 on
+# Hourly.
+#
+# PREDICTIONS, REGISTERED BEFORE THE RUNS.
+#   1. At comparable budgets the two designs land within roughly 0.15 sMAPE of
+#      each other on most periods. Neither the input side nor the synthesis side
+#      wavelet does much, because at complete forecast rank a freely learned
+#      projection absorbs any rotation and basis identity cannot change what is
+#      representable.
+#   2. Neither design beats the Generic baseline by a meaningful margin at its
+#      own budget, consistent with the trunk width result that a 48.8 fold
+#      parameter range moves M4 accuracy by 0.098 sMAPE.
+#   3. Both reach within about 0.2 sMAPE of the 8.2M Generic baseline at roughly
+#      1.3M parameters, so both sit on the same frontier.
+#   4. The DWT preprocessing arm degrades more on the short horizon periods,
+#      where only 2 or 3 decomposition levels are admissible and the sub-band
+#      split is coarse, than on Hourly where 5 levels are available.
+#
+# FALSIFIED IF: the preprocessing design wins by more than 0.3 sMAPE on four or
+# more periods at comparable budgets. That would mean decomposing the input does
+# something an in block basis cannot, my claimed distinction favours the prior
+# work rather than mine, and the paper must say so in those words.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_pramanick_comparison.yaml
+# ============================================================
+
+experiment_name: m4_pramanick_comparison
+category: baseline_comparison
+description: >
+  Head to head between DWT preprocessing with per sub-band Generic stacks and an
+  in block frozen synthesis basis, under one protocol with matched seeds, swept
+  across three parameter budgets on all six M4 periods.
+
+dataset: m4
+periods:
+  - Yearly
+  - Quarterly
+  - Monthly
+  - Weekly
+  - Daily
+  - Hourly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Yearly: 10
+    Quarterly: 10
+    Monthly: 10
+    Weekly: 10
+    Daily: 10
+    Hourly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: false
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  t_width: 256
+  trend_thetas_dim: 3
+  thetas_dim: 5
+  basis_dim: eq_fcast
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - design
+  - trunk_width
+  - true_architecture
+
+configs:
+  # ---- Pramanick style: DWT the input, one Generic stack per sub-band ----
+  - name: DWTpre_db3_2b_gw128
+    stacks: {type: homogeneous, block: Generic, n: 1}
+    block_params: {model_type: dwt_preprocess, wavelet_type: db3, n_levels: 5, n_blocks_per_band: 2, g_width: 128}
+    extra_fields: {design: dwt_preprocessing, trunk_width: 128, true_architecture: "per-subband Generic stacks, 2 blocks each"}
+
+  - name: DWTpre_db3_2b_gw256
+    stacks: {type: homogeneous, block: Generic, n: 1}
+    block_params: {model_type: dwt_preprocess, wavelet_type: db3, n_levels: 5, n_blocks_per_band: 2, g_width: 256}
+    extra_fields: {design: dwt_preprocessing, trunk_width: 256, true_architecture: "per-subband Generic stacks, 2 blocks each"}
+
+  - name: DWTpre_db3_2b_gw512
+    stacks: {type: homogeneous, block: Generic, n: 1}
+    block_params: {model_type: dwt_preprocess, wavelet_type: db3, n_levels: 5, n_blocks_per_band: 2, g_width: 512}
+    extra_fields: {design: dwt_preprocessing, trunk_width: 512, true_architecture: "per-subband Generic stacks, 2 blocks each"}
+
+  # ---- In block frozen synthesis basis, the design this paper proposes ----
+  - name: T+Db3V3_10s_gw128
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    block_params: {wavelet_type: db3, g_width: 128}
+    extra_fields: {design: in_block_basis, trunk_width: 128, true_architecture: "10 alternating Trend and frozen basis stacks"}
+
+  - name: T+Db3V3_10s_gw256
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    block_params: {wavelet_type: db3, g_width: 256}
+    extra_fields: {design: in_block_basis, trunk_width: 256, true_architecture: "10 alternating Trend and frozen basis stacks"}
+
+  - name: T+Db3V3_10s_gw512
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    block_params: {wavelet_type: db3, g_width: 512}
+    extra_fields: {design: in_block_basis, trunk_width: 512, true_architecture: "10 alternating Trend and frozen basis stacks"}
+
+  # ---- Paper baseline, no wavelet anywhere ----
+  - name: NBEATS-G_10s_ag0
+    stacks: {type: homogeneous, block: Generic, n: 10}
+    block_params: {g_width: 512}
+    extra_fields: {design: paper_baseline, trunk_width: 512, true_architecture: "10 Generic stacks"}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_pramanick_comparison_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
