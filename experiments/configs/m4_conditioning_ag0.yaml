@@ -1,0 +1,138 @@
+# ============================================================
+# Does CONDITIONING, rather than capture, predict which bases survive a plain
+# linear head at complete rank?
+#
+# THE HOLE THIS FILLS. At complete forecast rank every basis represents the
+# target exactly, so Proposition 2 says basis identity cannot change what the
+# model represents. Measured, it plainly does change what the model REACHES:
+#
+#   DCT               ag0  27.054      capture 0.999964   coef-0 share 0.9757
+#   KL                ag0  23.472      capture 0.999981   coef-0 share 0.9757
+#   band ordered db3  ag0  NOT RUN     capture 0.999885   coef-0 share 0.1597
+#   SVD db3           ag0   9.309      capture 0.999885   coef-0 share 0.0055
+#   random orthonormal ag0  9.333      capture 0.999900   coef-0 share 0.0027
+#
+# Capture is flat to the fourth decimal across all five and therefore explains
+# none of this. The proposed explanation is coefficient CONDITIONING: M4-Hourly
+# windows carry 0.9757 of their energy in the window mean, DCT row 0 is exactly
+# constant and the leading KL eigenvector is nearly so, so each of those bases
+# forces one coefficient near 225,000 alongside forty seven near 240. Required
+# dynamic ranges are 3126 and 3431 against 59 and 25 for the scrambled bases.
+#
+# Band ordered db3 is the one cell that separates the two accounts, and it is
+# the one cell I never ran. Its capture sits with the winners, at 0.999885, but
+# its conditioning sits in between, at a dynamic range of 668, because six
+# scaling coefficients share the DC energy instead of one. Capture predicts it
+# fails alongside... nothing, since capture predicts everything succeeds equally.
+# Conditioning predicts it succeeds, and by a comfortable margin.
+#
+# PREDICTIONS, REGISTERED BEFORE THE RUNS.
+#   1. Band ordered db3 at ag0 lands in the 9.2 to 9.6 band, with the SVD and
+#      random arms, NOT in the 23 to 27 band with DCT and KL.
+#   2. Its seed to seed standard deviation is under 0.5, unlike KL at ag0 whose
+#      4.313 reflects a failure RATE rather than a shifted mean.
+#   3. Ordering by dynamic range reproduces the ag0 sMAPE ordering; ordering by
+#      capture does not, and has no variance left to explain.
+#   4. Under agf all five arms collapse together into roughly 9.0 to 9.4, since
+#      a rectifier supplies the DC level for free and removes the conditioning
+#      burden entirely.
+#
+# FALSIFIED IF: band ordered db3 fails at ag0 like DCT and KL. Then the relevant
+# variable is not dynamic range but something specific to smooth global bases,
+# and the conditioning account needs replacing rather than refining.
+#
+# The DCT, KL, SVD db3 and random arms are already measured under exactly this
+# protocol; only the two ordered arms are new, so this is ten runs of new
+# compute for a three point test.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_conditioning_ag0.yaml
+# ============================================================
+
+experiment_name: m4_conditioning_ag0
+category: basis_identity
+description: >
+  Fills the missing band ordered wavelet cell at complete rank under a plain
+  linear head, to separate coefficient conditioning from captured energy as the
+  variable governing which frozen bases are trainable.
+
+dataset: m4
+periods:
+  - Hourly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Hourly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  g_width: 256                 # identical to m4_kl_complete, the arms being joined
+  basis_dim: eq_fcast
+  forecast_basis_dim: eq_fcast # complete forecast rank
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42                # identical seeds to the arms being compared
+
+extra_csv_columns:
+  - basis_kind
+  - basis_ordering
+  - dc_share
+  - dynamic_range
+  - conditioning_predicts
+
+configs:
+  - name: W_10s_cmpl_db3ordered_plain
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: "ordered:db3"}
+    extra_fields: {basis_kind: db3, basis_ordering: band, dc_share: 0.1597, dynamic_range: 668, conditioning_predicts: survives}
+
+  - name: W_10s_cmpl_db3ordered_agf
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    training: {active_g: forecast}
+    block_params: {wavelet_type: "ordered:db3"}
+    extra_fields: {basis_kind: db3, basis_ordering: band, dc_share: 0.1597, dynamic_range: 668, conditioning_predicts: survives}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_conditioning_ag0_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
