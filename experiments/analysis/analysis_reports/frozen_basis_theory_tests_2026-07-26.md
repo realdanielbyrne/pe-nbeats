@@ -53,13 +53,26 @@ where magnitudes are quoted. The ordering claim survives without qualification.
 M4-Hourly, pure WaveletV3, **complete** forecast rank `d_f = H = 48`, ten seeds, three placements of
 the nonlinearity relative to the frozen basis.
 
-| basis | none (linear) | after basis (agf) | between (probe) |
-|---|---|---|---|
-| db3 | 9.309 ± 0.147 | 9.072 ± 0.200 | 44.045 ± 3.247 |
-| DCT | 27.054 ± 5.691 | 9.102 ± 0.207 | 15.036 ± 0.651 |
-| random orthonormal | 9.333 ± 0.192 | 9.164 ± 0.147 | 55.523 ± 3.151 |
-| random orthonormal:7 | 9.299 ± 0.197 | 9.206 ± 0.172 | 49.484 ± 2.496 |
-| **identity across bases** | KW p = 6.4e-05, spread 17.755 | **KW p = 0.457, spread 0.133** | KW p = 1.9e-07, spread 40.487 |
+**COMPLETE, 240 of 240 runs, both periods.**
+
+| | basis | none (linear) | after basis (agf) | between (probe) |
+|---|---|---|---|---|
+| Hourly | db3 | 9.309 | 9.072 | 44.045 |
+| | DCT | 27.054 | 9.102 | 15.036 |
+| | random orthonormal | 9.333 | 9.164 | 55.523 |
+| | random orthonormal:7 | 9.299 | 9.206 | 49.484 |
+| | *identity* | KW p = 6.4e-05, sp 17.755 | **KW p = 0.457, sp 0.133** | KW p = 1.9e-07, sp 40.487 |
+| Monthly | db3 | 15.049 | 13.914 | 59.219 |
+| | DCT | 22.350 | 13.682 | 14.193 |
+| | random orthonormal | 15.865 | 14.134 | 56.946 |
+| | random orthonormal:7 | 13.872 | 14.062 | 62.237 |
+| | *identity* | KW p = 0.236, sp 8.478 | KW p = 0.038, sp 0.453 | KW p = 2.8e-05, sp 48.044 |
+
+The interposition break replicates decisively on both periods. The after basis null is clean on Hourly
+and marginal on Monthly. The linear cell is significant on Hourly, where the DCT fails on all ten
+seeds, and not on Monthly, where it fails on four of ten so the variance swamps the mean shift. The
+DCT's near immunity to interposition also replicates, 15.036 on Hourly and 14.193 on Monthly against
+its own after basis figure of 13.682, which is the conic hull prediction holding on a second period.
 
 **Registered prediction CONFIRMED.** Interposing the activation between projection and basis destroys
 the null and the accuracy together. The rotation absorption argument requires that no nonlinearity sit
