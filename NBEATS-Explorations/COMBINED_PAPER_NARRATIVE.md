@@ -1,3 +1,10 @@
+> **SUPERSEDED, 2026-07-27.** This document predates the NeurIPS reviews and the experiments run
+> since, and its primary thesis has been contradicted by them. Wavelet family is a well powered null,
+> the multiresolution mechanism does not exist under the shipped construction, and the compression is
+> 96 percent trunk width rather than basis. Do not use it to guide writing. See
+> [`NARRATIVE_SUPERSEDED_2026-07-27.md`](NARRATIVE_SUPERSEDED_2026-07-27.md) for the current position
+> and for which of its claims survive.
+
 # Combined Paper Narrative — NeurIPS 2026 Submission
 
 **Synthesized from:** `NARRATIVE_RECOMMENDATIONS.md`, `PAPER_NARRATIVE_RECOMMENDATIONS.md`, `claude_narrative_recs.md`  
