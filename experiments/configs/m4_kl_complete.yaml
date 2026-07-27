@@ -1,0 +1,114 @@
+# ============================================================
+# M4-Hourly — the KL cell the boundary study never ran
+#
+# THE PREDICTION UNDER TEST. The complete rank DCT fails under linear synthesis
+# (27.054 against 9.309 for db3) and is repaired by an output activation (9.102).
+# My explanation is CONDITIONING, not representation: at complete rank the exact
+# coefficient vector a DCT needs has one entry near 225,000 and forty seven near
+# 240, a dynamic range of 3126 with 97.6 percent of the coefficient energy in a
+# single number, because the DCT's first row is constant and unnormalised M4
+# series are large and positive. The scrambled bases need balanced coefficients,
+# range 25 to 59, and they train fine.
+#
+# The Karhunen Loeve basis has the SAME profile: 97.6 percent in one coefficient,
+# range 3431. So if conditioning is the mechanism, KL must fail under linear
+# synthesis exactly as the DCT does, and must be repaired by an output activation
+# exactly as the DCT is.
+#
+# FALSIFIED IF: KL trains fine at ag0. Then the coefficient dynamic range is not
+# what makes the DCT hard, and I have no mechanism for that cell.
+#
+# This is the cell I flagged as untested when giving the explanation, so it is
+# being run before the explanation is relied on.
+# ============================================================
+
+experiment_name: m4_kl_complete
+category: basis_identity
+description: >
+  Boundary test for the completeness argument. Basis identity is contrasted at
+  COMPLETE forecast rank under three placements of the nonlinearity: none,
+  after the basis (active_g), and between the projection and the basis
+  (theta_activation). The argument predicts a null in the first two and a break
+  in the third.
+
+dataset: m4
+periods:
+  - Hourly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Hourly: 10
+    Monthly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: true
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  g_width: 256
+  basis_dim: eq_fcast          # backcast rank pinned
+  forecast_basis_dim: eq_fcast # forecast basis COMPLETE: d_f = H, the regime
+                               # every M4 configuration in the paper occupies
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - basis_kind
+  - basis_is_wavelet
+  - nonlinearity_placement
+  - p2_predicts_null
+
+configs:
+  - name: W_10s_cmpl_kl_plain
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: "kl:experiments/bases/m4_hourly"}
+    extra_fields: {basis_kind: kl, basis_is_wavelet: false, nonlinearity_placement: none, p2_predicts_null: true}
+
+  - name: W_10s_cmpl_kl_agf
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    training: {active_g: forecast}
+    block_params: {wavelet_type: "kl:experiments/bases/m4_hourly"}
+    extra_fields: {basis_kind: kl, basis_is_wavelet: false, nonlinearity_placement: after_basis, p2_predicts_null: true}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_kl_complete_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true

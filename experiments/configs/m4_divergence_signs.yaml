@@ -1,0 +1,129 @@
+# ============================================================
+# Do the diverged Generic runs fail by emitting NEGATIVE forecasts?
+#
+# THE HYPOTHESIS. sMAPE is 200*|F-A|/(|F|+|A|). When the target is positive and
+# the forecast is negative, |F-A| = |F|+|A|, so that point scores EXACTLY 200,
+# the maximum. A converged 30 stack Generic on M4-Daily scores 3.1; the diverged
+# seeds score 17.4, 31.2 and 31.6. Working backwards, the fraction of forecast
+# points sitting at 200 needed to produce those numbers is:
+#
+#     17.4  ->   7.3 percent of points negative
+#     31.2  ->  14.3 percent
+#     31.6  ->  14.5 percent
+#
+# So a smallish minority of sign errors reproduces the observed divergence
+# exactly, and an output activation makes that failure mode structurally
+# impossible because ReLU cannot emit a negative number. That would explain why
+# active_g is one of the interventions that removes the instability, WITHOUT
+# appealing to expressiveness or to magnitude bounding, both of which I have
+# argued for previously and neither of which survives scrutiny: ReLU is
+# unbounded above, and with active_g='forecast' the backcast is not activated at
+# all so the residual cascade is untouched.
+#
+# WHY THIS NEEDS PREDICTIONS. Everything above is arithmetic consistent with the
+# sMAPE values. It is not evidence. The claim is falsifiable only by looking at
+# the forecasts themselves, so this config sets save_predictions and writes an
+# npz of preds and targets for every run.
+#
+# PREDICTIONS, REGISTERED BEFORE THE RUNS.
+#   1. In diverged ag0 runs, between roughly 5 and 20 percent of forecast points
+#      are negative, and the per point sMAPE of exactly those points is 200.
+#   2. In converged ag0 runs, essentially no forecast points are negative.
+#   3. In active_g=True runs, zero points are negative by construction, and the
+#      divergence rate is zero.
+#   4. Removing the negative points from a diverged run's score recovers roughly
+#      the converged score.
+# Prediction 4 is the decisive one. If deleting the sign errors does NOT recover
+# the converged score, then the negative forecasts are a symptom of some larger
+# failure rather than its cause, and the account is wrong.
+#
+# FALSIFIED IF: diverged runs contain no negative forecasts. Then sMAPE is being
+# inflated some other way, most likely by near zero forecasts, which drive the
+# denominator down without changing sign, and I would need a different account.
+#
+# Arms chosen for their divergence rate under the paper-sample protocol:
+# Generic_30s_sw0 diverges 5 of 10 on Weekly and 3 of 10 on Daily.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_divergence_signs.yaml
+# ============================================================
+
+experiment_name: m4_divergence_signs
+category: stability
+description: >
+  Saves per run forecasts for a Generic configuration known to diverge on a
+  minority of seeds, to test whether the divergence is sign errors punished at
+  the sMAPE ceiling rather than a general loss of fit.
+
+dataset: m4
+periods:
+  - Weekly
+  - Daily
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Weekly: 10
+    Daily: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: false         # sw0, the setting that diverges
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - arm
+  - expect_negative_forecasts
+
+configs:
+  - name: Generic_30s_sw0_ag0
+    stacks: {type: homogeneous, block: Generic, n: 30}
+    extra_fields: {arm: linear_head, expect_negative_forecasts: true}
+
+  - name: Generic_30s_sw0_agTrue
+    stacks: {type: homogeneous, block: Generic, n: 30}
+    training: {active_g: true}
+    extra_fields: {arm: relu_both_paths, expect_negative_forecasts: false}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_divergence_signs_results.csv
+  save_predictions: true       # THE POINT OF THIS CONFIG
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
