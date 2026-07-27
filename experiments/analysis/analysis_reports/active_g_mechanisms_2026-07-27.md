@@ -66,14 +66,13 @@ diverged baseline seed at 44.95.** Restricting to converged runs inverts it:
 * activeG against sumLosses: **+0.107 worse, MWU p = 6.1e-05**
 
 So `active_g=True` is insurance with a premium: it removes a rare catastrophic failure and taxes every
-run that would have been fine. And the premium is avoidable, since `sum_losses` reaches the same 0/50
-divergence rate at 13.561, statistically indistinguishable from the converged baseline.
+run that would have been fine. On this one period `sum_losses` looks like the same insurance without
+the premium, 0/50 at 13.561, and that is what I wrongly generalised. See the corrected rule below: it
+does not hold once other periods are included.
 
 **Why the tax exists.** With both paths rectified, no block can make a downward correction to the
 running forecast or a negative contribution to the residual. In a doubly residual cascade whose whole
 design is iterative correction, forbidding corrections in one direction costs real capacity.
-`sum_losses` stabilises by penalising backcast reconstruction error instead, which constrains nothing
-about sign.
 
 **Practical rule, CORRECTED.** An earlier version of this file recommended `sum_losses` over
 `active_g=True` as a free substitute stabiliser, on the strength of the Yearly cell above. That is
