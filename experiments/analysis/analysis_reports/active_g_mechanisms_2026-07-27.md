@@ -75,9 +75,32 @@ design is iterative correction, forbidding corrections in one direction costs re
 `sum_losses` stabilises by penalising backcast reconstruction error instead, which constrains nothing
 about sign.
 
-**Practical rule.** Prefer `sum_losses` to `active_g=True` for stability. Reserve `active_g="forecast"`
-for cases where it is measured to help, which on M4 is Hourly only, where it is worth −0.23 to −0.37 on
-frozen basis arms and is preferred in 9 of 9 matched stems.
+**Practical rule, CORRECTED.** An earlier version of this file recommended `sum_losses` over
+`active_g=True` as a free substitute stabiliser, on the strength of the Yearly cell above. That is
+withdrawn. Widening the search: `Generic_sumLosses` on Monthly collapsed 1 of 5 seeds to exactly 200
+test sMAPE, and pooled over 30,434 M4 runs the collapse rates are
+
+| setting | collapses at sMAPE 200 |
+|---|---|
+| plain linear head | 107 / 23,786 (0.45%) |
+| `sum_losses=True`, ag0 | 1 / 70 (1.4%) |
+| `active_g="forecast"` | 4 / 6,372 (0.06%) |
+| `active_g=True` | 0 / 136 |
+
+so the activation is the reliable stabiliser and `sum_losses` is not established as one. Reserve
+`active_g="forecast"` for cases where it is measured to help, which on M4 is Hourly only.
+
+**A measurement bug that invalidates the Milk study.** `validation_step` adds
+`0.25 * loss_fn(backcast, zeros)` when `sum_losses=True`, and sMAPE against zeros is 200 for any
+nonzero backcast, so that term contributes about 50 by construction. Measured offsets between
+`sum_losses` twins on Milk are 51.077 and 49.956 against a predicted 50.000. The Milk 2x2, 400 runs,
+therefore compares two different objectives rather than two model qualities, and **no `best_val_loss`
+comparison across `sum_losses` settings anywhere in this repository is valid.**
+
+**Existing-data corroboration for the sign account.** Of 112 runs at exactly sMAPE 200 across all M4
+results, 108 are `active_g=False` and 4 are `agf`. An output activation removes 96 percent of total
+collapses. The surviving 4 are informative: ReLU cannot emit a negative but can emit all zeros, and
+`sMAPE(0, A) = 200` too, so agf closes the negative route and leaves the rarer dead-zero route open.
 
 ## Where `agf` helps for reasons unrelated to sign
 
