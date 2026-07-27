@@ -168,7 +168,15 @@ def main():
     for name, basis in bases.items():
         for label, data in (("raw", ys), ("trend removed", resid)):
             s = stats(basis, data)
-            conv = MEASURED_CONVERGENCE.get(name, "") if label == "raw" else ""
+            # The convergence column is measured on M4-Hourly only. Printing it
+            # beside another dataset's statistics would invite a comparison that
+            # has no basis, so it is suppressed everywhere else.
+            on_m4_hourly = args.dataset == "m4" and args.period == "Hourly"
+            conv = (
+                MEASURED_CONVERGENCE.get(name, "")
+                if label == "raw" and on_m4_hourly
+                else ""
+            )
             print(
                 f"{name:20s} {conv:>6s} {label:16s} {s['top1']:7.4f} "
                 f"{s['eff_rank']:9.2f} {s['max_over_min']:10.1f} "
@@ -180,6 +188,11 @@ def main():
     # both converge 10/10, so their relative order carries no information and a
     # strict walk would penalise an arbitrary tiebreak.
     from scipy.stats import spearmanr
+
+    if not (args.dataset == "m4" and args.period == "Hourly"):
+        print("\n(convergence rates are measured on M4-Hourly only; "
+              "rank correlation suppressed for this dataset)")
+        return
 
     order = [n for n in bases if n in MEASURED_CONVERGENCE]
     rate = [eval(MEASURED_CONVERGENCE[n].replace("/", "/")) for n in order]
