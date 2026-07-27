@@ -1,0 +1,183 @@
+# ============================================================
+# Is the compression the BASIS, or is it just a narrower TRUNK?
+#
+# THE QUESTION. Every compression number in this line of work compares a
+# Trend+Seasonality backbone against a Trend+Wavelet backbone and reports a 10x
+# to 50x parameter reduction at matched accuracy. But the two arms differ in TWO
+# ways at once, and only one of them has ever been named:
+#
+#   1. the synthesis basis (learned Fourier pair vs frozen orthonormal DWT), and
+#   2. the trunk width (Seasonality defaults to s_width=2048, every wavelet and
+#      generic block defaults to g_width=512).
+#
+# Measured directly on M4-Yearly, 10 alternating stacks, no weight sharing:
+#
+#   Trend+Seasonality  s_width=2048   64,645,150 params   <- the paper default
+#   Trend+Seasonality  s_width=512     5,140,510
+#   Trend+HaarV3       g_width=512     5,084,190          <- 1.1 percent apart
+#
+# At MATCHED trunk width the two backbones are within about one percent of each
+# other on parameter count. So the entire 12.6x headline gap is the trunk, and
+# the basis contributes essentially nothing to the compression. That is an
+# arithmetic fact about the constructors, not a result.
+#
+# The result that is missing, and the reason for this config, is whether the
+# ACCURACY survives the narrowing. Two very different papers follow:
+#
+#   If narrowing s_width to 512 costs nothing, then legacy N-BEATS-I gets the
+#   same compression by editing one integer, the basis is irrelevant to the
+#   compression story, and the honest claim is "the Seasonality trunk is four
+#   times wider than the task needs."
+#
+#   If narrowing s_width degrades Trend+Seasonality while Trend+Wavelet holds at
+#   the same width, then the frozen basis is precisely what MAKES a narrow trunk
+#   viable. That is a considerably stronger and more interesting claim than
+#   anything currently in the paper, and it would be worth the ink.
+#
+# Both outcomes are publishable and I do not know which one is true, which is
+# the entire point of running it.
+#
+# PREDICTIONS, REGISTERED BEFORE THE RUNS.
+#   1. Trend+Seasonality at s_width=512 is within 0.15 sMAPE of s_width=2048 on
+#      Yearly. The trunk is over-wide and narrowing it is close to free.
+#   2. At every matched trunk width rung (512, 256, 128), Trend+Seasonality and
+#      Trend+Wavelet are statistically indistinguishable after Bonferroni. This
+#      is the family null again, now controlled for width rather than confounded
+#      with it.
+#   3. Both families degrade at the same rung as width shrinks, because the
+#      binding constraint is trunk capacity and not basis identity.
+#   4. Therefore the answer to "could legacy N-BEATS reach this compression with
+#      a narrower trunk" is yes, and the compression claim must be restated as
+#      structural rather than attributed to the wavelet.
+#
+# FALSIFIED IF: prediction 2 fails in the wavelet's favour at 256 or 128, that
+# is, Trend+Seasonality collapses on narrowing while Trend+Wavelet does not. I
+# would take that result gladly and rewrite the claim around it.
+#
+# CONTROLS. Identical seeds, identical protocol, identical trend branch, one
+# block per stack, no weight sharing, ag0 throughout so nothing here depends on
+# the activation. Only the second block type and its trunk width vary.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_trunk_width_attribution.yaml
+# ============================================================
+
+experiment_name: m4_trunk_width_attribution
+category: attribution
+description: >
+  Separates trunk width from synthesis basis as the source of the reported
+  parameter compression, by narrowing the Seasonality trunk to wavelet scale and
+  comparing both families at matched width.
+
+dataset: m4
+periods:
+  - Yearly
+  - Monthly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Yearly: 10
+    Monthly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: false
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  t_width: 256              # trend branch pinned across every arm
+  trend_thetas_dim: 3
+  thetas_dim: 5
+  basis_dim: eq_fcast
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - second_block
+  - trunk_width
+  - trunk_matched_pair
+
+configs:
+  # ---- Trend + Seasonality, trunk narrowed from the paper default downwards ----
+  - name: T+S_10s_sw2048
+    stacks: {type: alternating, blocks: [Trend, Seasonality], repeats: 5}
+    block_params: {s_width: 2048}
+    extra_fields: {second_block: Seasonality, trunk_width: 2048, trunk_matched_pair: none}
+
+  - name: T+S_10s_sw1024
+    stacks: {type: alternating, blocks: [Trend, Seasonality], repeats: 5}
+    block_params: {s_width: 1024}
+    extra_fields: {second_block: Seasonality, trunk_width: 1024, trunk_matched_pair: none}
+
+  - name: T+S_10s_sw512
+    stacks: {type: alternating, blocks: [Trend, Seasonality], repeats: 5}
+    block_params: {s_width: 512}
+    extra_fields: {second_block: Seasonality, trunk_width: 512, trunk_matched_pair: w512}
+
+  - name: T+S_10s_sw256
+    stacks: {type: alternating, blocks: [Trend, Seasonality], repeats: 5}
+    block_params: {s_width: 256}
+    extra_fields: {second_block: Seasonality, trunk_width: 256, trunk_matched_pair: w256}
+
+  - name: T+S_10s_sw128
+    stacks: {type: alternating, blocks: [Trend, Seasonality], repeats: 5}
+    block_params: {s_width: 128}
+    extra_fields: {second_block: Seasonality, trunk_width: 128, trunk_matched_pair: w128}
+
+  # ---- Trend + frozen wavelet basis at the matched trunk widths ----
+  - name: T+HaarV3_10s_gw512
+    stacks: {type: alternating, blocks: [Trend, HaarWaveletV3], repeats: 5}
+    block_params: {g_width: 512}
+    extra_fields: {second_block: HaarWaveletV3, trunk_width: 512, trunk_matched_pair: w512}
+
+  - name: T+HaarV3_10s_gw256
+    stacks: {type: alternating, blocks: [Trend, HaarWaveletV3], repeats: 5}
+    block_params: {g_width: 256}
+    extra_fields: {second_block: HaarWaveletV3, trunk_width: 256, trunk_matched_pair: w256}
+
+  - name: T+HaarV3_10s_gw128
+    stacks: {type: alternating, blocks: [Trend, HaarWaveletV3], repeats: 5}
+    block_params: {g_width: 128}
+    extra_fields: {second_block: HaarWaveletV3, trunk_width: 128, trunk_matched_pair: w128}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_trunk_width_attribution_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
