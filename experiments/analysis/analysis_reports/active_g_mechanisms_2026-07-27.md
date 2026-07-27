@@ -121,13 +121,52 @@ as a single device.
 At complete rank all bases represent the target exactly, yet DCT and KL fail under a linear head while
 db3 and random draws do not. The cause is the coefficient vector each basis requires:
 
-| basis | share of coefficient energy in coefficient 0 | dynamic range | ag0 sMAPE | seeds that converge |
-|---|---|---|---|---|
-| DCT | 0.9757 | 3126 | 27.054 | 0 / 10 |
-| KL | 0.9757 | 3431 | 23.472 | **0 / 10** |
-| band ordered db3 | 0.1597 | 668 | **9.569** (median 9.194) | **9 / 10** |
-| SVD db3 | 0.0055 | 59 | 9.309 | 10 / 10 |
-| random orthonormal | 0.0027 | 25 | 9.333 | 10 / 10 |
+Canonical numbers, recomputed 2026-07-27 over all 214,810 M4-Hourly forecast windows by
+`experiments/scripts/basis_conditioning.py`. **These supersede the figures in the first version of this
+table**, which came from a different window set and are not reproducible; the ordering and every
+conclusion are unchanged, but the magnitudes moved (DCT in particular, 3126 against 1081).
+
+| basis | top-1 energy share | effective rank | max/min | ag0 sMAPE | seeds that converge |
+|---|---|---|---|---|---|
+| KL | 0.9757 | **1.05** | 3722.3 | 23.472 | **0 / 10** |
+| DCT | 0.7992 | 1.54 | 1081.2 | 27.054 | 0 / 10 |
+| band ordered db3 | 0.1685 | 6.03 | 604.9 | **9.569** (median 9.194) | **9 / 10** |
+| SVD db3 | 0.1459 | 17.86 | 38.7 | 9.309 | 10 / 10 |
+| random orthonormal | 0.1184 | 17.12 | 24.9 | 9.333 | 10 / 10 |
+
+**Two corrections to how this was previously reported.** First, the earlier table used "share of
+coefficient 0", which is not comparable across these bases: coefficient 0 is the constant row for the
+DCT and the leading eigenvector for KL, but an arbitrary row for SVD db3 and for a random draw, whose
+rows carry no energy ordering at all. That understated the scrambled bases at 0.0055 and 0.0027 when
+their true largest coefficients hold 0.1459 and 0.1184. **Top-1 share**, the energy fraction in the
+largest coefficient whichever it is, is ordering independent and is the statistic of record.
+
+Second, "dynamic range" invites confusion with the matrix condition number, which is exactly 1 for
+every basis here since all are orthonormal. The quantity is the spread of the **target coefficient
+distribution** the head must learn to emit, not a property of the basis matrix.
+
+**Robustness.** Ranking the five bases against their measured convergence rate, with Spearman so that
+the two arms tied at 10/10 are not penalised by an arbitrary tiebreak:
+
+| statistic | rho | verdict |
+|---|---|---|
+| top-1 share | **−0.949** | at the ceiling attainable under the tie structure |
+| effective rank | **+0.949** | at the ceiling |
+| max/min | **−0.949** | at the ceiling |
+| p95/p5 | −0.632 | fails |
+| max/median | −0.791 | fails |
+
+The two percentile measures fail for a diagnostic reason rather than a random one: both discard or
+downweight the extreme coefficient, and the extreme coefficient is the coordinate that causes the
+failure. **Effective rank**, the participation ratio `1 / sum_k e_k^2`, is the measure to report. It
+depends on no order statistic and it states the failure condition without apology: a linear synthesis
+head cannot train when the target effectively occupies one coordinate out of forty eight.
+
+**Lower dispersion is better for training and worse for approximation, and the two are in direct
+conflict.** Concentration is precisely what makes KL and DCT the best bases at truncated rank, where
+they reach 0.9714 and 0.9630 captured energy on Traffic against 0.3035 for a wavelet. The resolution is
+not to prefer a flatter basis and surrender the capture, but to repair the optimisation side and keep
+the approximation win, which is what both an output rectifier and a Trend block do.
 
 The band ordered cell was run on 2026-07-27 with predictions registered in
 `experiments/configs/m4_conditioning_ag0.yaml`, and it lands where conditioning says it should rather
