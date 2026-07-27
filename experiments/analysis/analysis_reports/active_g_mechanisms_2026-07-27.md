@@ -121,13 +121,33 @@ as a single device.
 At complete rank all bases represent the target exactly, yet DCT and KL fail under a linear head while
 db3 and random draws do not. The cause is the coefficient vector each basis requires:
 
-| basis | share of coefficient energy in coefficient 0 | dynamic range | ag0 sMAPE |
-|---|---|---|---|
-| DCT | 0.9757 | 3126 | 27.054 |
-| KL | 0.9757 | 3431 | 23.472 |
-| band ordered db3 | 0.1597 | 668 | not run |
-| SVD db3 | 0.0055 | 59 | 9.309 |
-| random orthonormal | 0.0027 | 25 | 9.333 |
+| basis | share of coefficient energy in coefficient 0 | dynamic range | ag0 sMAPE | seeds that converge |
+|---|---|---|---|---|
+| DCT | 0.9757 | 3126 | 27.054 | 0 / 10 |
+| KL | 0.9757 | 3431 | 23.472 | **0 / 10** |
+| band ordered db3 | 0.1597 | 668 | **9.569** (median 9.194) | **9 / 10** |
+| SVD db3 | 0.0055 | 59 | 9.309 | 10 / 10 |
+| random orthonormal | 0.0027 | 25 | 9.333 | 10 / 10 |
+
+The band ordered cell was run on 2026-07-27 with predictions registered in
+`experiments/configs/m4_conditioning_ag0.yaml`, and it lands where conditioning says it should rather
+than where capture says it should: capture is flat to the fourth decimal across all five rows and
+therefore predicts no differences at all, while dynamic range sorts them into the three tiers observed.
+Per seed, the separation is not a shifted mean but a failure rate:
+
+```
+band ordered db3, ag0:  8.927  9.036  9.133  9.166  9.171  9.217  9.241  9.282  9.294  13.220
+KL,               ag0: 16.944 20.962 20.967 20.978 21.229 21.357 25.086 28.916 29.106 29.172
+```
+
+Nine of ten band ordered seeds land in a 0.37 wide band whose median of 9.194 is slightly better than
+SVD db3's mean, and one seed fails. Not a single KL seed succeeds. **One registered prediction failed
+here and is recorded as such:** I predicted a standard deviation under 0.5 and measured 1.288, because
+I expected the intermediate conditioning to produce clean convergence rather than a reduced failure
+rate. The direction was right and the mechanism claim is unchanged, but the specific prediction was
+wrong and the honest reading is that dynamic range 668 buys a 90 percent success rate rather than
+immunity. Under `agf` the arm collapses to 9.103 ± 0.075 with all ten seeds converging, alongside KL at
+9.081 and DCT at 9.102, exactly as predicted.
 
 M4-Hourly windows carry 0.9757 of their energy in the mean, and DCT row 0 is exactly constant while
 KL's leading eigenvector is nearly so, so each aligns one row with almost all the energy. The block
