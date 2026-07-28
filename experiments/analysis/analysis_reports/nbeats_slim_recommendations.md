@@ -30,7 +30,7 @@ apply**, which is the pre-flight check below.
 | Backcast basis rank | **truncate**, `d_b ≈ H` | The backcast has no target, so its rank incurs no approximation error; 11 of 12 paired M4 comparisons favour the truncated basis | strong |
 | Basis family | **irrelevant at complete rank** | 36 paired comparisons at identical parameter counts, none significant, minimum p = 0.084; family null over eight datasets, Fisher p = 0.125 | strong |
 | Output head | **rectified**, subject to the condition below | Total collapses fall from 107 of 23,786 runs to 4 of 6,372 with a rectified forecast, and to 0 of 136 with both paths rectified | strong |
-| Trend branch | **pair it** when the spectrum is concentrated | Takes a DCT from 28.748 to 9.111 and a Karhunen-Loève basis from 27.607 to 9.291, both from 0 of 10 seeds converging to 10 of 10, p = 0.00018 | strong |
+| Trend branch | **conditional**, on when effective rank < 4 or the window mean dominates | Rescues a concentrated target: DCT 28.748 → 9.111, Karhunen-Loève 27.607 → 9.291, both 0/10 → 10/10 seeds, p = 0.00018. But it **costs** 0.3 to 0.6 sMAPE where the target is not concentrated (Tourism Quarterly p = 0.021, Monthly p = 0.0073) | strong, corrected 2026-07-28 |
 | Loss | sMAPE or MASE as the task requires | — | — |
 
 ## The pre-flight check, which is the actual contribution
@@ -59,6 +59,17 @@ is a far cheaper answer than the sweep it replaces, but it is not the free lunch
 Shipped as `lightningnbeats.preflight.recommend(windows, forecast_length)`, returning a configuration
 and the measurements that produced it. This is the piece a library should expose, because it converts
 "which settings do I use" from a sweep into a function call.
+
+## The trend branch is not free, which I had wrong
+
+I first recommended it as always on. Out of sample on Tourism it is **significantly worse** on two of
+three horizons, costing 0.344 on Quarterly (p = 0.021) and 0.609 on Monthly (p = 0.0073). What it buys
+is not accuracy but **tail protection at very short horizons**: on Tourism-Yearly at H=4, the same model
+without it has a standard deviation of 8.12 against 0.46 with it, while its median is actually better.
+
+Corrected rule: **pair a trend branch when effective rank is below about 4 or the window mean carries
+most of the energy, and otherwise leave it off.** Those are the conditions the pre-flight check already
+reports, so the decision is made before training either way. [strong, corrected]
 
 ## The one condition on the rectified head, which is easy to get wrong
 

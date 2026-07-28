@@ -1399,3 +1399,35 @@ class TestKLBasis:
         backcast, forecast = kl(torch.randn(4, 30))
         assert backcast.shape == (4, 30)
         assert forecast.shape == (4, 6)
+
+
+class TestOrderedBasisFullRank:
+    """The band-ordering path must never return a rank deficient basis.
+
+    Regression test. `periodization` is orthonormal only while every halving
+    acts on an even length; once a level produced an odd length the frame
+    stopped spanning and QR silently returned fewer rows than target_length,
+    which then mismatched the block's theta layer at forward time. Measured
+    before the guard: haar gave 18 rows at length 24, 42 at 48, 88 at 96.
+    """
+
+    @pytest.mark.parametrize("length", [4, 6, 8, 12, 13, 14, 18, 24, 48, 96, 240])
+    @pytest.mark.parametrize("family", ["haar", "db2", "db3"])
+    def test_ordered_basis_is_square(self, length, family):
+        from lightningnbeats.blocks.blocks import _WaveletGeneratorV3
+
+        gen = _WaveletGeneratorV3(length, f"ordered:{family}")
+        assert gen.basis.shape[0] == length, (
+            f"ordered:{family} at length {length} returned "
+            f"{gen.basis.shape[0]} rows"
+        )
+
+    @pytest.mark.parametrize("length", [24, 48, 96])
+    def test_ordered_basis_is_orthonormal(self, length):
+        import torch
+
+        from lightningnbeats.blocks.blocks import _WaveletGeneratorV3
+
+        b = _WaveletGeneratorV3(length, "ordered:haar").basis.double()
+        gram = b @ b.T
+        assert torch.allclose(gram, torch.eye(length, dtype=torch.float64), atol=1e-8)

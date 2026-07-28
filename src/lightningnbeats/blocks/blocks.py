@@ -2681,9 +2681,20 @@ class _WaveletGeneratorV3(nn.Module):
             # locality under FIXED truncation, and it does not exist under the per
             # signal selection that makes wavelets good in the first place.
             family = kind.split(":", 1)[1]
+            # The periodization synthesis operator is square and orthonormal only
+            # while every halving acts on an even length. Once a level produces an
+            # odd length the frame stops spanning, QR silently returns fewer rows
+            # than target_length, and the block's theta layer no longer matches
+            # its basis. Measured before this guard: haar at length 24 gave 18
+            # rows, at 48 gave 42, at 96 gave 88. Clamp the depth so that
+            # target_length is divisible by 2**level.
+            max_even_level = 0
+            while target_length % (2 ** (max_even_level + 1)) == 0:
+                max_even_level += 1
             level = min(
                 pywt.dwt_max_level(target_length, PyWavelet(family).dec_len),
                 max_decomp_level,
+                max_even_level,
             )
             structure = pywt.wavedec(
                 np.zeros(target_length), family, level=level, mode="periodization"
@@ -2704,6 +2715,14 @@ class _WaveletGeneratorV3(nn.Module):
             diag = np.abs(np.diag(r))
             keep = diag > 1e-10 * max(diag[0], np.finfo(np.float64).tiny)
             ortho = q.T[keep]
+            if ortho.shape[0] != target_length:
+                raise ValueError(
+                    f"ordered:{family} produced a rank {ortho.shape[0]} basis for "
+                    f"target_length={target_length} at level {level}; it must be "
+                    f"full rank. A rank deficient basis silently mismatches the "
+                    f"theta layer. Use a family whose decomposition keeps every "
+                    f"length even, or a global basis such as dct."
+                )
             full_rank = ortho.shape[0]
             offset = min(basis_offset, full_rank - 1)
             available = full_rank - offset
