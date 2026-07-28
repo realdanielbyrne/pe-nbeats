@@ -138,9 +138,18 @@ band 5                  0.498 negative
 
 Five of six bands are half negative by construction, because that is what a detail band is. A rectified
 forecast head forbids a stack from emitting a negative contribution, so it forbids five of the six
-stacks from doing their job. **Rectification is architecturally incompatible with sub-band
-decomposition**, and applying it "symmetrically" is symmetric only in the configuration file, not in
-effect.
+stacks from doing their job. Applying the rectifier "symmetrically" is therefore symmetric only in the
+configuration file, not in effect.
+
+**The magnitude does not yet add up, and I am not claiming it does.** Forcing a stack to emit `ReLU` of
+a zero mean quantity gives it a positive mean of about `sigma / sqrt(2 pi)`. Summed over the five detail
+bands on M4-Daily that is 144.8 against a mean absolute target of 5875, or **2.5 percent**, which is
+worth a couple of sMAPE and not thirty. So the incompatibility is real and the arithmetic of my
+explanation for its size is wrong. `m4_dwt_relu_diagnostic.yaml` saves forecasts from both designs with
+and without the rectifier to separate three candidates: systematic overshoot, dead stacks starved of
+gradient by the rectifier's flat region, and runaway positive scale compensating for forbidden
+negatives. Until that returns, the honest statement is that rectification destroys the preprocessing
+design and I have measured that its most obvious cause accounts for under a tenth of the effect.
 
 So the ag0 comparison above stands as the valid one, and the agf regime is reported here as a null
 result about my own experimental design rather than as evidence about theirs. The claim I set out to

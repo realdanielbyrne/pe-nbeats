@@ -1,0 +1,144 @@
+# ============================================================
+# WHY does rectifying the forecast head destroy the DWT preprocessing design?
+#
+# THE OBSERVATION. Applying active_g="forecast" symmetrically to both designs
+# left the in block arms unchanged (M4-Daily 3.214 to 3.212) and destroyed the
+# preprocessing arms (6.261 to 33.281). Both are built from identical Generic
+# blocks with identical trunks and identical linear heads, so the block is not
+# the difference.
+#
+# THE EXPLANATION I PROPOSED, AND WHY IT IS INSUFFICIENT. Detail sub-bands are
+# zero mean, so forcing a stack to emit ReLU of a signed quantity gives it a
+# positive mean of about sigma/sqrt(2*pi). Measured on M4-Daily that spurious
+# bias totals 144.8 across the five detail bands against a mean absolute target
+# of 5875, which is **2.5 percent**. That is worth a couple of sMAPE at most,
+# not thirty. The mechanism is real and far too small, so something else is
+# doing the work and I do not currently know what.
+#
+# CANDIDATE MECHANISMS, to be separated by the saved forecasts.
+#   A. Systematic overshoot. Six non negative contributions can only push the
+#      forecast up, so the model cannot subtract and biases high. Signature:
+#      predictions exceed targets almost everywhere, errors are one sided.
+#   B. Dead stacks. A rectified output that is negative pre activation receives
+#      zero gradient, and a zero mean input drives that about half the time, so
+#      the detail stacks may never learn and the model degrades to the
+#      approximation band alone with a sixth of its capacity. Signature:
+#      detail contributions collapse toward zero and the forecast tracks a
+#      smoothed version of the series.
+#   C. Runaway scale. Nothing bounds a rectified head above, so a stack that
+#      cannot express a needed negative may compensate with a large positive
+#      elsewhere. Signature: a heavy upper tail in the predictions.
+#   D. Sign collapse of the usual kind, ruled out in advance by construction,
+#      since a rectifier cannot emit a negative. Included only to confirm the
+#      failure is NOT the mechanism documented elsewhere in this work.
+#
+# PREDICTIONS, REGISTERED BEFORE THE RUNS.
+#   1. The agf preprocessing arm overshoots: the median signed error
+#      (prediction minus target) is clearly positive, where the ag0 arm is
+#      centred near zero.
+#   2. The overshoot is much larger than 2.5 percent of the target, confirming
+#      that the analytic rectification bias is not the explanation.
+#   3. Not a single agf run reaches exactly 200, since a rectifier cannot emit
+#      a negative. The failure is a different one from the collapse documented
+#      elsewhere.
+#   4. Mechanism B is visible or it is not: if the detail stacks have gone dead
+#      the agf predictions will be markedly smoother than the ag0 predictions,
+#      measured by the mean absolute first difference.
+#
+# FALSIFIED IF: the agf predictions are centred and unsmoothed, in which case
+# none of A, B or C is right and I would report the failure as unexplained
+# rather than invent a fourth story to fit it.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_dwt_relu_diagnostic.yaml
+# ============================================================
+
+experiment_name: m4_dwt_relu_diagnostic
+category: mechanism
+description: >
+  Saves forecasts for the DWT preprocessing design with and without a rectified
+  head, on the period where rectification is most destructive, to identify why
+  an intervention that is harmless to the in block design is catastrophic here.
+
+dataset: m4
+periods:
+  - Daily
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Daily: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: false
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+block_params:
+  thetas_dim: 5
+  basis_dim: eq_fcast
+
+runs:
+  n_runs: 5
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - design
+  - head
+
+configs:
+  - name: DWTpre_gw512_ag0
+    stacks: {type: homogeneous, block: Generic, n: 1}
+    block_params: {model_type: dwt_preprocess, wavelet_type: db3, n_levels: 5, n_blocks_per_band: 2, g_width: 512}
+    extra_fields: {design: dwt_preprocessing, head: linear}
+
+  - name: DWTpre_gw512_agf
+    stacks: {type: homogeneous, block: Generic, n: 1}
+    training: {active_g: forecast}
+    block_params: {model_type: dwt_preprocess, wavelet_type: db3, n_levels: 5, n_blocks_per_band: 2, g_width: 512}
+    extra_fields: {design: dwt_preprocessing, head: rectified}
+
+  - name: T+Db3V3_10s_gw512_ag0
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    block_params: {wavelet_type: db3, g_width: 512, trend_thetas_dim: 3, forecast_basis_dim: eq_fcast}
+    extra_fields: {design: in_block, head: linear}
+
+  - name: T+Db3V3_10s_gw512_agf
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    training: {active_g: forecast}
+    block_params: {wavelet_type: db3, g_width: 512, trend_thetas_dim: 3, forecast_basis_dim: eq_fcast}
+    extra_fields: {design: in_block, head: rectified}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_dwt_relu_diagnostic_results.csv
+  save_predictions: true        # THE POINT OF THIS CONFIG
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
