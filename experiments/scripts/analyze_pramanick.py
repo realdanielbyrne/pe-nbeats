@@ -24,7 +24,10 @@ import sys
 import pandas as pd
 from scipy.stats import mannwhitneyu
 
-CSV = "experiments/results/m4/m4_pramanick_comparison_results.csv"
+CSV = os.environ.get(
+    "PRAMANICK_CSV", "experiments/results/m4/m4_pramanick_comparison_results.csv"
+)
+AGF_CSV = "experiments/results/m4/m4_pramanick_comparison_agf_results.csv"
 PERIODS = ["Yearly", "Quarterly", "Monthly", "Weekly", "Daily", "Hourly"]
 DWT_ARMS = ["DWTpre_db3_2b_gw128", "DWTpre_db3_2b_gw256", "DWTpre_db3_2b_gw512"]
 MINE_ARMS = ["T+Db3V3_10s_gw128", "T+Db3V3_10s_gw256", "T+Db3V3_10s_gw512"]
@@ -158,6 +161,40 @@ def main():
     print(f"runs at exactly sMAPE 200: {len(coll)}")
     if len(coll):
         print(coll.groupby(["design", "config_name"]).size().to_string())
+
+    # Cross regime comparison. The claim under test is that captured energy and
+    # effective rank govern the ordering in BOTH activation regimes, so the
+    # winner should not change when an output rectifier is added to both designs.
+    other = AGF_CSV if CSV != AGF_CSV else \
+        "experiments/results/m4/m4_pramanick_comparison_results.csv"
+    if not os.path.exists(other):
+        return
+    print("\n" + "=" * 78)
+    print("CROSS REGIME: ag0 against agf, both designs rectified symmetrically")
+    print("=" * 78)
+    odf = pd.read_csv(other)
+    this_is_agf = CSV == AGF_CSV
+    a_name, b_name = ("agf", "ag0") if this_is_agf else ("ag0", "agf")
+    print(f"{'period':10s} {'pair':>34s} {a_name:>9s} {b_name:>9s} {'winner ' + a_name:>16s}")
+    wins = {a_name: 0, b_name: 0}
+    for period in PERIODS:
+        for dwt, mine, gap, dp, mp in budget_matched_pairs(df, period):
+            a = cell(df, dwt, period).median() - cell(df, mine, period).median()
+            if odf.empty:
+                continue
+            ob = cell(odf, dwt, period)
+            om = cell(odf, mine, period)
+            if len(ob) < 3 or len(om) < 3:
+                continue
+            b = ob.median() - om.median()
+            for nm, v in ((a_name, a), (b_name, b)):
+                if v > 0:
+                    wins[nm] += 1
+            print(f"{period:10s} {dwt.split('_')[-1] + ' vs ' + mine.split('_')[-1]:>34s} "
+                  f"{a:+9.3f} {b:+9.3f} {'in-block' if a > 0 else 'dwt-pre':>16s}")
+    print(f"\nin-block wins on median: {wins[a_name]} under {a_name}, "
+          f"{wins[b_name]} under {b_name}")
+    print("Ordering is regime independent if these agree.")
 
 
 if __name__ == "__main__":
