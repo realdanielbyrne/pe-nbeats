@@ -1,0 +1,165 @@
+# ============================================================
+# Is the Traffic-96 deficit a basis problem or a trunk problem?
+#
+# THE SITUATION. Traffic-96 is the one dataset where the paper baselines beat
+# the frozen basis arms outright, and the margin is large: NBEATS-G_30s_agf at
+# 25.033 or NBEATS-IG_30s_ag0 at 26.244 against the best frozen basis arm,
+# TW_10s_td3_bd2eq_sym10, at 27.147. A gap of 1.1 to 3.1 sMAPE depending which
+# arms are compared. The paper concedes this and reframes as a frontier claim.
+#
+# WHAT NOBODY CHECKED. The two families were never run at the same trunk width.
+# TrendWavelet blocks default to t_width=256; Generic blocks default to 512.
+# At 10 stacks on Traffic-96 with L=480:
+#
+#     NBEATS-G   g_width=512   13,291,520      <- the baseline that wins
+#     TW         t_width=256    3,960,700      <- the arm that loses
+#     TW         t_width=512   11,850,620      <- NEVER RUN, 11 percent apart
+#
+# So the reported deficit is measured against a baseline carrying twice the
+# trunk width, and the matched cell does not exist. This is the identical
+# confound found on M4, where correcting it showed trunk width to be inert
+# across a 48.8 fold parameter range.
+#
+# WHY TRAFFIC MIGHT GO THE OTHER WAY, and why that matters more than winning.
+# On M4 the trunk was inert, so narrowing it was free. Traffic's target energy
+# is spread over far more directions than M4's: effective rank of the target
+# coefficient distribution runs 2.54 to 58.22 across bases on Traffic against
+# 1.05 to 17.86 on M4-Hourly, and Traffic's leading eigenvector holds 0.61 of
+# the energy against 0.98 for M4-Hourly. A signal spread over more directions
+# plausibly needs more capacity to synthesise, so Traffic is exactly where the
+# inertness should break.
+#
+# If it does break, that is a better result than closing the gap. It gives the
+# paper the boundary of its own central claim, stated quantitatively and
+# measurable before training: compression is safe when the target's energy is
+# concentrated, and Traffic is the case where it is not.
+#
+# WHAT THIS IS NOT. It is not a search for a configuration that wins. Depth has
+# already been tested and does not help: tripling from 10 to 30 stacks moves the
+# frozen basis arms by +0.02, +0.18, -0.12, +0.44 and +0.97 sMAPE, mostly worse,
+# while the Generic baseline gains 0.65 from the same change (p = 0.014). Adding
+# stacks widens the gap rather than closing it. Basis identity cannot help
+# either: the forecast basis is already complete in these arms, so a rotation is
+# absorbed by the learned projection and no choice of matrix changes what is
+# representable. Trunk width is the one axis left untested.
+#
+# PREDICTIONS, REGISTERED BEFORE THE RUNS.
+#   1. Traffic trunk width is NOT inert, unlike M4. Widening TW from 256 to 512
+#      improves sMAPE by more than 0.5.
+#   2. At matched width the gap to the baseline falls below 1.0 sMAPE, from the
+#      2.1 measured at mismatched widths.
+#   3. The Generic baseline also degrades when narrowed to 256 and 128, so the
+#      effect is capacity rather than architecture, and both families move
+#      together.
+#   4. The width curve on Traffic is monotone over the range tested, where the
+#      M4 curve was flat across 48.8 fold.
+#
+# FALSIFIED IF: TW at 512 does not improve on TW at 256. Then Traffic trunk
+# width is inert too, the deficit is genuinely architectural, and the paper must
+# report that the method loses on Traffic for a reason it cannot repair.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/traffic96_trunk_width.yaml
+# ============================================================
+
+experiment_name: traffic96_trunk_width
+category: attribution
+description: >
+  Tests whether the Traffic-96 deficit against the paper baselines is trunk
+  width rather than basis, by sweeping trunk width in both families at the same
+  depth, protocol and seeds.
+
+dataset: traffic
+periods:
+  - Traffic-96
+
+protocol:
+  normalize: false
+  train_ratio: 0.7
+  val_ratio: 0.1
+  include_target: true
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_epochs: 100
+  patience: 10
+  n_blocks_per_stack: 1
+  share_weights: false
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5        # L = 480 = 5H, the regime that does not collapse
+  batch_size: 1024
+
+block_params:
+  trend_thetas_dim: 3
+  basis_dim: 2*eq_fcast         # the better of the two measured backcast ranks
+  wavelet_type: sym10           # the best frozen basis arm on Traffic
+
+runs:
+  n_runs: 5
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - family
+  - trunk_width
+
+configs:
+  # ---- frozen basis, trunk swept including the never run matched cell ----
+  - name: TW_10s_w128
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {t_width: 128}
+    extra_fields: {family: frozen_basis, trunk_width: 128}
+
+  - name: TW_10s_w256
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {t_width: 256}
+    extra_fields: {family: frozen_basis, trunk_width: 256}
+
+  - name: TW_10s_w512
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {t_width: 512}
+    extra_fields: {family: frozen_basis, trunk_width: 512}
+
+  - name: TW_10s_w1024
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {t_width: 1024}
+    extra_fields: {family: frozen_basis, trunk_width: 1024}
+
+  # ---- paper baseline, same trunk ladder ----
+  - name: NBEATS-G_10s_w128
+    stacks: {type: homogeneous, block: Generic, n: 10}
+    block_params: {g_width: 128}
+    extra_fields: {family: paper_baseline, trunk_width: 128}
+
+  - name: NBEATS-G_10s_w256
+    stacks: {type: homogeneous, block: Generic, n: 10}
+    block_params: {g_width: 256}
+    extra_fields: {family: paper_baseline, trunk_width: 256}
+
+  - name: NBEATS-G_10s_w512
+    stacks: {type: homogeneous, block: Generic, n: 10}
+    block_params: {g_width: 512}
+    extra_fields: {family: paper_baseline, trunk_width: 512}
+
+output:
+  results_dir: experiments/results
+  csv_filename: traffic96_trunk_width_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
