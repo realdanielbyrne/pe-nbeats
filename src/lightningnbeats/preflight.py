@@ -57,6 +57,7 @@ class Recommendation:
     recommended_trunk_width: int = 128
     needs_rectifier: bool = False
     needs_trend_branch: bool = False
+    recommended_basis: str = "dct"
     notes: list = field(default_factory=list)
 
     def report(self):
@@ -72,6 +73,7 @@ class Recommendation:
             "",
             "Recommended configuration",
             "-" * 58,
+            f"  basis                      {self.recommended_basis}",
             f"  forecast basis rank        {self.recommended_forecast_rank}",
             f"  trunk width                {self.recommended_trunk_width}",
             f"  stacks                     10",
@@ -269,8 +271,42 @@ def recommend(windows, forecast_length=None, param_budget=None):
     if param_budget:
         rec.notes.append(f"parameter budget {param_budget:,} supplied by caller")
 
+    # BASIS. At complete rank identity is provably inert, so this is decided on
+    # engineering grounds rather than accuracy. The deciding constraint is that
+    # a wavelet needs enough samples to decompose: at H = 4, 6 or 8 every family
+    # except haar returns level 0 and degenerates to an approximation only
+    # basis, silently. Short horizons are exactly where business data lives.
+    rec.recommended_basis = "dct"
+    usable = _usable_wavelets(horizon)
+    if usable:
+        rec.notes.append(
+            f"basis: DCT. At complete rank identity cannot change what is "
+            f"representable, so this is an engineering choice: DCT is defined "
+            f"at every horizon, deterministic, and needs no fitting. Wavelet "
+            f"families usable at H={horizon}: {', '.join(usable)} [strong]"
+        )
+    else:
+        rec.notes.append(
+            f"basis: DCT, and do NOT substitute a wavelet here. At H={horizon} "
+            f"no wavelet family admits a decomposition, so every one degenerates "
+            f"to an approximation only basis without raising an error [strong]"
+        )
+
     rec.notes.append(
         "cap depth at 10 stacks; 30 stacks bought nothing on any M4 period and "
         "collapsed the Generic family on Quarterly and Daily [strong]"
     )
     return rec
+
+
+def _usable_wavelets(horizon, families=("haar", "db2", "db3", "coif2", "sym10")):
+    """Families that can actually decompose a target of this length."""
+    try:
+        import pywt
+    except ImportError:  # pragma: no cover - pywt is a hard dependency in practice
+        return []
+    return [
+        f
+        for f in families
+        if pywt.dwt_max_level(horizon, pywt.Wavelet(f).dec_len) >= 1
+    ]

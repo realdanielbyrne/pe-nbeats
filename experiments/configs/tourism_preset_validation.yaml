@@ -1,0 +1,167 @@
+# ============================================================
+# Do the recommended defaults hold on a dataset they were not derived from?
+#
+# WHY TOURISM. Every default in the recipe was derived from M4, with Traffic as
+# the one counterexample. Tourism was never used to pick any of them, so it is a
+# genuine out of sample test of the defaults rather than a confirmation of them.
+# It also spans three horizons that stress the recommendation differently:
+# Yearly H=4, Quarterly H=8, Monthly H=24.
+#
+# THE BASIS QUESTION THIS SETTLES. At complete forecast rank basis identity is
+# provably inert, so the choice is an engineering one, and the deciding
+# constraint is a structural fact rather than an accuracy result: a wavelet
+# needs enough samples to decompose. Maximum DWT level by horizon:
+#
+#        H     haar     db2     db3   coif2   sym10
+#        4        2       0       0       0       0
+#        6        2       1       0       0       0
+#        8        3       1       0       0       0
+#       24        4       3       2       1       0
+#
+# At H=4 and H=8, which is Tourism-Yearly and Tourism-Quarterly, every family
+# except haar returns level 0 and degenerates to an approximation only basis
+# WITHOUT raising an error. db3, the family this work treats as canonical, is
+# unusable on M4-Yearly, M4-Quarterly, Tourism-Yearly, Tourism-Quarterly and
+# Milk. A wavelet default would silently fail across most short horizon business
+# forecasting. DCT and random orthonormal have no minimum length.
+#
+# So the recommended default basis is DCT, and this study checks that the
+# recommendation does not cost accuracy where a wavelet IS usable (H=24), and
+# that it holds up where one is not (H=4, H=8).
+#
+# THE PRESETS UNDER TEST, named to parallel N-BEATS's own G / I+G / I.
+#   Slim-B   10 frozen basis blocks, no trend branch.        Parallel of G.
+#   Slim-TB  5 alternating Trend and frozen basis pairs.     Parallel of I+G.
+#   Both at trunk 128, 10 stacks, complete forecast rank, rectified forecast
+#   head, which is the full recipe.
+#
+# PREDICTIONS, REGISTERED BEFORE THE RUNS.
+#   1. Slim-TB with DCT is within 0.5 sMAPE of the better paper baseline on all
+#      three periods, at roughly an order of magnitude fewer parameters.
+#   2. DCT and haar are statistically indistinguishable at H=24 where both are
+#      valid, since at complete rank identity cannot matter.
+#   3. Slim-B, lacking a trend branch, is worse than Slim-TB on at least two of
+#      three periods, and the gap is largest where the window mean carries most
+#      of the energy.
+#   4. Nothing collapses to sMAPE 200, because the forecast head is rectified
+#      and Tourism targets are non negative.
+#
+# FALSIFIED IF: Slim-TB with DCT loses to the paper baselines by more than 1.0
+# sMAPE on two or more periods. Then the defaults are M4 specific rather than
+# general, and the recipe must be scoped to M4 like data rather than offered as
+# a starting point for arbitrary series.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/tourism_preset_validation.yaml
+# ============================================================
+
+experiment_name: tourism_preset_validation
+category: defaults_validation
+description: >
+  Out of sample check of the recommended defaults on Tourism, a dataset used to
+  derive none of them, across three horizons that differ in whether a wavelet
+  basis is even admissible.
+
+dataset: tourism
+periods:
+  - Tourism-Yearly
+  - Tourism-Quarterly
+  - Tourism-Monthly
+
+training:
+  active_g: forecast          # rectified forecast head; Tourism is non negative
+  sum_losses: false
+  activation: ReLU
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  max_epochs: 100
+  patience: 10
+  n_blocks_per_stack: 1
+  share_weights: true
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  warmup_epochs: 15
+  eta_min: 0.000001
+
+block_params:
+  thetas_dim: 5
+  trend_thetas_dim: 3
+  basis_dim: eq_fcast
+  forecast_basis_dim: eq_fcast   # complete forecast rank, the recommended default
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - preset
+  - basis
+  - trunk_width
+
+configs:
+  # ---- Slim-TB, the recommended default, across candidate bases ----
+  - name: SlimTB_dct_w128
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    block_params: {wavelet_type: dct, g_width: 128, t_width: 128}
+    extra_fields: {preset: Slim-TB, basis: dct, trunk_width: 128}
+
+  - name: SlimTB_haar_w128
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    block_params: {wavelet_type: "ordered:haar", g_width: 128, t_width: 128}
+    extra_fields: {preset: Slim-TB, basis: ordered_haar, trunk_width: 128}
+
+  - name: SlimTB_rand_w128
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    block_params: {wavelet_type: "random_ortho", g_width: 128, t_width: 128}
+    extra_fields: {preset: Slim-TB, basis: random_ortho, trunk_width: 128}
+
+  # ---- Slim-B, no trend branch, to test whether the trend branch earns itself ----
+  - name: SlimB_dct_w128
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: dct, g_width: 128}
+    extra_fields: {preset: Slim-B, basis: dct, trunk_width: 128}
+
+  - name: SlimB_haar_w128
+    stacks: {type: homogeneous, block: WaveletV3, n: 10}
+    block_params: {wavelet_type: "ordered:haar", g_width: 128}
+    extra_fields: {preset: Slim-B, basis: ordered_haar, trunk_width: 128}
+
+  # ---- does the narrow trunk hold here, or is 128 an M4 artifact ----
+  - name: SlimTB_dct_w512
+    stacks: {type: alternating, blocks: [Trend, WaveletV3], repeats: 5}
+    block_params: {wavelet_type: dct, g_width: 512, t_width: 512}
+    extra_fields: {preset: Slim-TB, basis: dct, trunk_width: 512}
+
+  # ---- paper baselines at their own defaults ----
+  - name: NBEATS-G_10s
+    stacks: {type: homogeneous, block: Generic, n: 10}
+    block_params: {g_width: 512}
+    extra_fields: {preset: baseline, basis: learned, trunk_width: 512}
+
+  - name: NBEATS-IG_10s
+    stacks: {type: prefix_body, prefix: [Trend, Seasonality], body: Generic, n_body: 8}
+    block_params: {g_width: 512, s_width: 2048, t_width: 256}
+    extra_fields: {preset: baseline, basis: fourier, trunk_width: 512}
+
+output:
+  results_dir: experiments/results
+  csv_filename: tourism_preset_validation_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true
