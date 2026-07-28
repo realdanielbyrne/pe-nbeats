@@ -101,32 +101,59 @@ def _coefficient_spectrum(windows, basis=None):
     return np.sqrt(np.mean(theta**2, axis=0)), basis
 
 
-def analyze(windows):
-    """Geometry of the target ensemble. No training, no GPU, no basis choice."""
-    windows = np.asarray(windows, dtype=np.float64)
-    rms, basis = _coefficient_spectrum(windows)
-    energy = rms**2 / np.sum(rms**2)
+def _detrend(windows, degree=2):
+    """Remove the subspace a trend branch spans, span{1, t, ..., t^degree}."""
+    horizon = windows.shape[1]
+    t = np.linspace(0.0, 1.0, horizon)
+    vander = np.vstack([t**k for k in range(degree + 1)]).T
+    return windows - windows @ (vander @ np.linalg.pinv(vander)).T
 
+
+def _capture_curve(windows):
+    rms, _ = _coefficient_spectrum(windows)
+    energy = rms**2 / max(np.sum(rms**2), np.finfo(float).tiny)
     horizon = windows.shape[1]
     cumulative = np.cumsum(energy)
+    ranks = sorted({1, 2, 4, 8, 16, 32, horizon // 4, horizon // 2, horizon})
     capture = {
-        int(r): float(cumulative[min(r, horizon) - 1])
-        for r in sorted({1, 2, 4, 8, 16, 32, horizon // 4, horizon // 2, horizon})
-        if 1 <= r <= horizon
+        int(r): float(cumulative[min(r, horizon) - 1]) for r in ranks if 1 <= r <= horizon
     }
+    return energy, capture
 
-    # Share of energy carried by the window mean, the component a trend branch
-    # or a rectified head supplies for free.
+
+def analyze(windows):
+    """Geometry of the target ensemble. No training, no GPU, no basis choice.
+
+    Reported twice: on the raw targets, and on the targets after removing the
+    low order polynomial a trend branch spans. The detrended view is the one the
+    capacity rule uses, because a large constant offset otherwise dominates the
+    spectrum and makes any series look compressible. A window mean of 100 on
+    unit variance noise puts 99.99 percent of the energy in one direction, so
+    the raw statistic would recommend a narrow trunk for white noise.
+    """
+    windows = np.asarray(windows, dtype=np.float64)
+    horizon = windows.shape[1]
+
+    energy, capture = _capture_curve(windows)
+    residual = _detrend(windows)
+    energy_d, capture_d = _capture_curve(residual)
+
     means = windows.mean(axis=1, keepdims=True)
     dc_share = float(
         np.sum(means**2) * horizon / max(np.sum(windows**2), np.finfo(float).tiny)
     )
+    trend_share = 1.0 - float(
+        np.sum(residual**2) / max(np.sum(windows**2), np.finfo(float).tiny)
+    )
 
     return {
         "effective_rank": float(1.0 / np.sum(energy**2)),
+        "effective_rank_detrended": float(1.0 / np.sum(energy_d**2)),
         "top1_share": float(energy.max()),
         "dc_share": dc_share,
+        "trend_share": trend_share,
         "capture": capture,
+        "capture_detrended": capture_d,
         "horizon": horizon,
     }
 
@@ -203,30 +230,42 @@ def recommend(windows, forecast_length=None, param_budget=None):
     # horizon must be retained. The discriminating statistic is the fraction of
     # the horizon needed to reach the capture target: 4 of 48 on M4-Hourly, or
     # 8 percent, against all 96 on Traffic-96.
-    rank_needed = min(sufficient) if sufficient else horizon
+    # Keyed to the DETRENDED spectrum: a trend branch supplies the low order
+    # component anyway, so what decides capacity is how compressible the
+    # remainder is. Using the raw spectrum here would call white noise with a
+    # large offset compressible.
+    sufficient_d = [
+        r for r, c in stats["capture_detrended"].items() if c >= _CAPTURE_TARGET
+    ]
+    rank_needed = min(sufficient_d) if sufficient_d else horizon
     rec.compressibility = rank_needed / horizon
-    if rec.compressibility <= 0.25:
-        rec.recommended_trunk_width = 128
-        rec.notes.append(
-            f"only {rank_needed} of {horizon} directions are needed for "
-            f"{_CAPTURE_TARGET:.3f} capture, so the target is highly "
-            f"compressible; a narrow trunk is expected to be free, and 128 "
-            f"matched 2048 across a 48.8 fold range on M4 [strong on M4]"
-        )
-    else:
-        rec.recommended_trunk_width = 512
-        rec.notes.append(
-            f"{rank_needed} of {horizon} directions are needed for "
-            f"{_CAPTURE_TARGET:.3f} capture, so the target is NOT compressible "
-            f"and a narrow trunk is likely to cost accuracy; keep 512 "
-            f"[provisional, see caveat]"
-        )
-        rec.notes.append(
-            "CAVEAT: the trunk width rule is measured on M4 only, where the "
-            "target is compressible. The incompressible branch is a mechanistic "
-            "prediction awaiting a second dataset; treat 512 as a safe default "
-            "rather than a measured optimum [provisional]"
-        )
+
+    # CAPACITY. Reported as a diagnostic, NOT used to pick the width.
+    #
+    # I tried to key the trunk width to compressibility and the rule is refuted
+    # by my own measurements. Trunk width is inert on M4-Yearly and M4-Monthly
+    # across a 48.8 fold range, Kruskal-Wallis p = 0.776 and 0.773, so width 128
+    # is correct there. Detrended compressibility for those two periods is 0.500
+    # and 0.889, which any threshold separating them from Traffic-96 at 1.000
+    # would misclassify as needing a wide trunk. The statistic separates rank
+    # deficient from full rank targets cleanly on synthetic data at any offset,
+    # but it does not predict trunk sensitivity, and shipping it as though it
+    # did would contradict the evidence.
+    #
+    # So the default is the measured one and the caveat is explicit. Anyone with
+    # a held out split should simply try both; it is one integer and two runs.
+    rec.recommended_trunk_width = 128
+    rec.notes.append(
+        "trunk width 128 is the measured default: on M4 it matched 2048 across "
+        "a 48.8 fold parameter range, Kruskal-Wallis p = 0.776 [strong on M4]"
+    )
+    rec.notes.append(
+        f"compressibility {rec.compressibility:.3f} ({rank_needed} of {horizon} "
+        f"directions needed) is reported as a diagnostic only. I have NO "
+        f"validated predictor of when a narrow trunk is unsafe; this statistic "
+        f"was tested for that role and refuted against M4. If accuracy matters, "
+        f"try 128 and 512 on a held out split [unvalidated]"
+    )
     if param_budget:
         rec.notes.append(f"parameter budget {param_budget:,} supplied by caller")
 

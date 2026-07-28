@@ -25,7 +25,7 @@ apply**, which is the pre-flight check below.
 | Setting | Default | Why | Grade |
 |---|---|---|---|
 | Stacks | **10** | 30 stacks bought nothing on any M4 period for N-BEATS-I+G (−0.200 to +0.026, none significant) and collapsed the Generic family on Quarterly (+4.96, p = 0.001) and Daily (+5.60) | strong |
-| Trunk width | **128** if compressible, else 512 | On M4, 1,323,550 against 64,645,150 parameters scored 13.707 against 13.645; Kruskal-Wallis p = 0.776 across a 48.8 fold range | strong on M4 |
+| Trunk width | **128** | On M4, 1,323,550 against 64,645,150 parameters scored 13.707 against 13.645; Kruskal-Wallis p = 0.776 across a 48.8 fold range. No validated way to know in advance when this is unsafe, see below | strong on M4 |
 | Forecast basis rank | **complete**, `d_f = H` | At complete rank a freely learned projection absorbs any rotation, so identity is provably inert and the choice of matrix is free. Below it, accuracy degrades predictably with captured energy | strong |
 | Backcast basis rank | **truncate**, `d_b ≈ H` | The backcast has no target, so its rank incurs no approximation error; 11 of 12 paired M4 comparisons favour the truncated basis | strong |
 | Basis family | **irrelevant at complete rank** | 36 paired comparisons at identical parameter counts, none significant, minimum p = 0.084; family null over eight datasets, Fisher p = 0.125 | strong |
@@ -37,17 +37,24 @@ apply**, which is the pre-flight check below.
 
 Two numbers computed from the training windows, no GPU, no training:
 
-**Compressibility** = fraction of the horizon needed to capture 99.9% of target energy. It decides
-whether the narrow trunk is safe.
-
-```
-M4-Hourly    4 of 48 directions   compressibility 0.083   ->  trunk 128
-Traffic-96  96 of 96 directions   compressibility 1.000   ->  trunk 512
-```
-
 **Effective rank** = participation ratio of the coefficient spectrum, roughly how many coefficients
 carry the signal. It decides whether a plain linear head will train at all. Below about 4, pair a trend
-branch or rectify the output; M4-Hourly sits at 1.05 and fails on every seed without one.
+branch or rectify the output; M4-Hourly sits at 1.05 and fails on every seed without one. This rule is
+supported: the same quantity tracks measured convergence rate at rho = +0.949, and both remedies are
+measured to work.
+
+**Compressibility** = fraction of the horizon needed to capture 99.9% of the *detrended* target energy.
+Reported as a diagnostic. **It is not a validated predictor of trunk sensitivity and should not be used
+as one.** I built it for that purpose and it failed against my own data: M4-Yearly and Monthly sit at
+0.500 and 0.889, which any threshold separating them from Traffic-96 at 1.000 would misclassify as
+needing a wide trunk, yet both are measured inert across a 48.8 fold range. It does separate rank
+deficient from full rank targets cleanly on synthetic data at any offset, so it measures something real;
+it just does not measure this. Reported with that caveat attached rather than dropped, because the
+negative result is worth knowing.
+
+**So there is currently no way to know in advance whether the narrow trunk is safe on a new dataset.**
+The honest procedure is to try 128 and 512 on a held out split. That is one integer and two runs, which
+is a far cheaper answer than the sweep it replaces, but it is not the free lunch a predictor would be.
 
 Shipped as `lightningnbeats.preflight.recommend(windows, forecast_length)`, returning a configuration
 and the measurements that produced it. This is the piece a library should expose, because it converts
