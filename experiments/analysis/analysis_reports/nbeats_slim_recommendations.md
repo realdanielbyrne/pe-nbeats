@@ -29,7 +29,7 @@ apply**, which is the pre-flight check below.
 | Forecast basis rank | **complete**, `d_f = H` | At complete rank a freely learned projection absorbs any rotation, so identity is provably inert and the choice of matrix is free. Below it, accuracy degrades predictably with captured energy | strong |
 | Backcast basis rank | **truncate**, `d_b ≈ H` | The backcast has no target, so its rank incurs no approximation error; 11 of 12 paired M4 comparisons favour the truncated basis | strong |
 | Basis family | **irrelevant at complete rank** | 36 paired comparisons at identical parameter counts, none significant, minimum p = 0.084; family null over eight datasets, Fisher p = 0.125 | strong |
-| Output head | **rectified** on non negative targets | Total collapses fall from 107 of 23,786 runs to 4 of 6,372 with a rectified forecast, and to 0 of 136 with both paths rectified | strong |
+| Output head | **rectified**, subject to the condition below | Total collapses fall from 107 of 23,786 runs to 4 of 6,372 with a rectified forecast, and to 0 of 136 with both paths rectified | strong |
 | Trend branch | **pair it** when the spectrum is concentrated | Takes a DCT from 28.748 to 9.111 and a Karhunen-Loève basis from 27.607 to 9.291, both from 0 of 10 seeds converging to 10 of 10, p = 0.00018 | strong |
 | Loss | sMAPE or MASE as the task requires | — | — |
 
@@ -59,6 +59,21 @@ is a far cheaper answer than the sweep it replaces, but it is not the free lunch
 Shipped as `lightningnbeats.preflight.recommend(windows, forecast_length)`, returning a configuration
 and the measurements that produced it. This is the piece a library should expose, because it converts
 "which settings do I use" from a sweep into a function call.
+
+## The one condition on the rectified head, which is easy to get wrong
+
+The rule is **not** "rectify when the targets are positive". It is **"rectify when each block's own
+output should be positive"**, and those come apart.
+
+In a doubly residual stack over a non negative series, each block emits a partial reconstruction of a
+positive target, so rectifying is free. In any architecture whose blocks emit *signed components that
+are supposed to cancel*, rectifying forbids them from doing their job. A decomposition based design is
+the clear case: measured on M4-Daily, five of six DWT sub-bands are about half negative by
+construction, since that is what a detail band is. Rectifying such a model degrades it catastrophically,
+by 9 to 40 sMAPE across periods.
+
+I found this by applying the rectifier symmetrically to two architectures for fairness and discovering
+that symmetric in the configuration file is not symmetric in effect. [strong]
 
 ## What NOT to do, all measured
 

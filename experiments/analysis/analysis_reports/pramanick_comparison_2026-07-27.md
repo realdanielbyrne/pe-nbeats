@@ -105,6 +105,53 @@ cross band interaction that independent per band stacks cannot provide.
 **Falsification condition: preprocessing wins by more than 0.3 sMAPE on four or more periods. NOT
 MET** — one period on the mean, zero on the median, and that one is my own collapsed seed.
 
+## The second activation regime, and why I am discarding it
+
+I ran the whole study again with `active_g="forecast"` applied symmetrically to both designs, 420 more
+runs, registered in `m4_pramanick_comparison_agf.yaml` as a test of whether the ordering is regime
+independent. **The result favours the in block design enormously and I am not using it, because the
+comparison is not fair.**
+
+| period, larger rung | DWT preprocessing | in block | Δ |
+|---|---|---|---|
+| Monthly | 22.896 | 13.760 | +9.136 |
+| Weekly | 16.722 | 7.208 | +9.514 |
+| Daily | 33.281 | 3.273 | +30.008 |
+| Hourly | 49.026 | 9.092 | +39.934 |
+
+Ten of ten, every one at p = 0.0002. The in block arms barely moved from their ag0 values, 3.212
+against 3.214 on Daily, while the preprocessing arms fell apart.
+
+**Registered prediction 3 said their design would improve too. It failed, in the opposite direction and
+by a wide margin, and the reason is structural.** Their design decomposes the input into sub-bands and
+gives each its own stack, and the detail sub-bands are zero mean oscillations. Measured on M4-Daily,
+the fraction of each component below zero:
+
+```
+band 0 (approximation)  0.000 negative   mean +5813.97
+band 1                  0.489 negative
+band 2                  0.493 negative
+band 3                  0.505 negative
+band 4                  0.497 negative
+band 5                  0.498 negative
+```
+
+Five of six bands are half negative by construction, because that is what a detail band is. A rectified
+forecast head forbids a stack from emitting a negative contribution, so it forbids five of the six
+stacks from doing their job. **Rectification is architecturally incompatible with sub-band
+decomposition**, and applying it "symmetrically" is symmetric only in the configuration file, not in
+effect.
+
+So the ag0 comparison above stands as the valid one, and the agf regime is reported here as a null
+result about my own experimental design rather than as evidence about theirs. The claim I set out to
+test, that the ordering is regime independent, is simply not testable this way.
+
+**This also qualifies a recommendation I make elsewhere.** A rectified output head is safe when each
+block emits a partial reconstruction of a non negative target. It is unsafe whenever blocks emit signed
+components that are supposed to cancel, which includes any decomposition based architecture. The rule
+is not "rectify when the targets are positive"; it is "rectify when each block's own output should be
+positive", and those are different conditions.
+
 ## Scope, stated plainly
 
 This is my reimplementation from a published description, without the authors' code, on data their

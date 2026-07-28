@@ -219,6 +219,14 @@ def recommend(windows, forecast_length=None, param_budget=None):
             "targets are non negative, so a rectified forecast head removes the "
             "collapse mode at no representational cost [strong]"
         )
+        rec.notes.append(
+            "CONDITION: rectify only if each BLOCK's output is itself a partial "
+            "reconstruction of a non negative target. Never rectify an "
+            "architecture whose blocks emit signed components that cancel, such "
+            "as one fed sub-band decompositions: measured on M4-Daily, five of "
+            "six DWT bands are about half negative by construction, and "
+            "rectifying such a model degrades it catastrophically [strong]"
+        )
     else:
         rec.notes.append(
             "targets take negative values, so do NOT rectify the forecast head; "
