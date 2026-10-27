@@ -56,12 +56,12 @@ from lightning.pytorch import loggers as pl_loggers
 # Allow running from project root or experiments/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from lightningnbeats.models import NBeatsNet
-from lightningnbeats.loaders import (
+from pe_nbeats.models import NBeatsNet
+from pe_nbeats.loaders import (
     ColumnarCollectionTimeSeriesDataModule,
     ColumnarCollectionTimeSeriesTestDataModule,
 )
-from lightningnbeats.data import M4Dataset, TrafficDataset, WeatherDataset, TourismDataset
+from pe_nbeats.data import M4Dataset, TrafficDataset, WeatherDataset, TourismDataset
 
 torch.set_float32_matmul_precision("medium")
 

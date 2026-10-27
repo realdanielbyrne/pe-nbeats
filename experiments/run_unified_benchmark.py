@@ -90,13 +90,13 @@ from lightning.pytorch import loggers as pl_loggers
 # Allow running from project root or experiments/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from lightningnbeats.models import NBeatsNet, DWTPreprocessNBeats
-from lightningnbeats.loaders import (
+from pe_nbeats.models import NBeatsNet, DWTPreprocessNBeats
+from pe_nbeats.loaders import (
     ColumnarCollectionTimeSeriesDataModule,
     ColumnarCollectionTimeSeriesTestDataModule,
     TimeSeriesDataModule,
 )
-from lightningnbeats.data import (
+from pe_nbeats.data import (
     M4Dataset,
     TourismDataset,
     MilkDataset,

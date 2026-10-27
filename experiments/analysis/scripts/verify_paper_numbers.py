@@ -1,4 +1,4 @@
-"""Verify the numerical claims in NBEATS-Explorations/.../neurips_2026.tex against
+"""Verify the numerical claims in pe-nbeats-paper/.../neurips_2026.tex against
 the canonical CSVs under experiments/results/. Applies the strict health filter
 (diverged | smape>100 | (best_epoch==0 & smape>50) | NaN) before aggregation.
 

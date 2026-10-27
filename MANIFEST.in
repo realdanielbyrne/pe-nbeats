@@ -1,0 +1,14 @@
+include LICENSE README.md CHANGELOG.md pyproject.toml
+graft src/pe_nbeats
+graft src/lightningnbeats
+prune src/pe_nbeats/data/M4/Train
+prune src/pe_nbeats/data/M4/Test
+prune src/pe_nbeats/data/M4/docs
+exclude src/pe_nbeats/data/M4/M4-info.csv
+exclude src/pe_nbeats/data/energy_dataset.csv
+exclude src/pe_nbeats/data/monthly-beer-production-in-austr.csv
+exclude src/pe_nbeats/data/sales-of-shampoo-over-a-three-ye.csv
+exclude src/pe_nbeats/data/daily-minimum-temperatures-in-me.csv
+exclude src/pe_nbeats/data/Electric_Production.csv
+exclude src/pe_nbeats/data/monthly-sunspots.csv
+global-exclude __pycache__ *.py[cod]

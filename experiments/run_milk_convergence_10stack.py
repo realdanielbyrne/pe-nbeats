@@ -46,8 +46,8 @@ from lightning.pytorch import loggers as pl_loggers
 # Allow running from project root or experiments/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from lightningnbeats.models import NBeatsNet
-from lightningnbeats.loaders import TimeSeriesDataModule
+from pe_nbeats.models import NBeatsNet
+from pe_nbeats.loaders import TimeSeriesDataModule
 
 torch.set_float32_matmul_precision("medium")
 
@@ -84,7 +84,7 @@ MILK_CONVERGENCE_CONFIGS = {
 # Paths
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results", "milk_convergence_10stack")
 MILK_CSV_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "src", "lightningnbeats", "data", "milk.csv"
+    os.path.dirname(__file__), "..", "src", "pe_nbeats", "data", "milk.csv"
 )
 
 # CSV schema — matches Part 6 convergence study with milk-specific adaptations

@@ -12,7 +12,7 @@ Do not proactively suggest follow-up actions, next steps, testing recommendation
 
 ## Project Overview
 
-PyTorch Lightning implementation of the N-BEATS (Neural Basis Expansion Analysis for Time Series) forecasting algorithm, published as the `lightningnbeats` PyPI package. Extends the original paper with wavelet basis expansion blocks, autoencoder variants, bottleneck generic blocks, and fully customizable stack compositions.
+PyTorch Lightning implementation of the N-BEATS (Neural Basis Expansion Analysis for Time Series) forecasting algorithm, published as the `pe-nbeats` PyPI package (import `pe_nbeats`; formerly `lightningnbeats`). Extends the original paper with wavelet basis expansion blocks, autoencoder variants, bottleneck generic blocks, and fully customizable stack compositions.
 
 ### Requirements
 
@@ -26,7 +26,7 @@ Supports multiple accelerators: **CUDA** (NVIDIA GPUs), **MPS** (Apple Silicon v
 
 ```bash
 pip install -e .                    # editable install from source
-pip install lightningnbeats          # install from PyPI
+pip install pe-nbeats          # install from PyPI
 python -m build                      # build distribution package
 ```
 
@@ -130,11 +130,11 @@ pytest tests/test_blocks.py -k "test_output_shapes"       # run single test meth
 
 For the complete testing guide, including conventions for adding coverage and common troubleshooting tips, see [`TESTING.md`](TESTING.md).
 
-Test files: `test_blocks.py` (block shapes, attributes, registries), `test_loaders.py` (DataModule setup, splits), `test_models.py` (width selection, optimizer dispatch, forward pass, sum_losses). Note: CI does not run tests before publishing. No linter or formatter is configured.
+Test files: `test_blocks.py` (block shapes, attributes, registries), `test_loaders.py` (DataModule setup, splits), `test_models.py` (width selection, optimizer dispatch, forward pass, sum_losses). No linter or formatter is configured.
 
 ## Architecture
 
-### Package Structure (`src/lightningnbeats/`)
+### Package Structure (`src/pe_nbeats/`)
 
 - **`models.py`** — Two model classes sharing a common `_NBeatsBase(pl.LightningModule)` superclass:
   - `NBeatsNet` — The standard N-BEATS model with doubly residual stacking.
@@ -148,7 +148,7 @@ Test files: `test_blocks.py` (block shapes, attributes, registries), `test_loade
   - Wavelet blocks (`HaarWaveletV3`, `DB2WaveletV3`, etc.) are thin subclasses that only set the wavelet type string. `WaveletV3` uses orthonormal DWT bases.
   - `TrendWavelet` merges polynomial trend and orthonormal DWT basis expansions in a single block. `TrendWaveletGeneric` extends it with a third learned low-rank generic basis branch; AE / LG / VAE descendants preserve the same additive decomposition.
   - Basis generators (`_SeasonalityGenerator`, `_TrendGenerator`, `_WaveletGeneratorV3`) produce non-trainable basis matrices registered as buffers.
-  - V1 and V2 wavelet blocks were removed due to instability (NaN failures and MASE blow-ups) documented in `NBEATS-Explorations/paper.md` Section 5.1.3. Use V3 wavelet variants.
+  - V1 and V2 wavelet blocks were removed due to instability (NaN failures and MASE blow-ups) documented in the companion paper (now in the private `pe-nbeats-paper` repo). Use V3 wavelet variants.
 - **`loaders.py`** — PyTorch Lightning DataModules and Datasets. Two data layout conventions:
   - **Row-oriented** (M4 format): rows = series, cols = time observations. `RowCollectionTimeSeriesDataModule` splits by time dimension; validation = last `backcast + forecast` columns.
   - **Columnar** (Tourism format): cols = series, rows = time observations. `ColumnarCollectionTimeSeriesDataModule` supports `no_val` mode. Short series are padded with zeros.
@@ -158,8 +158,8 @@ Test files: `test_blocks.py` (block shapes, attributes, registries), `test_loade
 - **`constants.py`** — String registries: `ACTIVATIONS`, `LOSSES`, `OPTIMIZERS`, `BLOCKS`. All configuration is resolved by string lookup against these lists.
 - **`data/benchmark_dataset.py`** — `BenchmarkDataset(ABC)`: abstract base class all datasets implement. Interface: `train_data`, `test_data`, `forecast_length`, `frequency`, `name`, `supports_owa`, `compute_owa()`, `get_training_series()`.
 - **`data/M4/`** — `M4Dataset(BenchmarkDataset)` loader with bundled CSV data files for all 6 M4 periods. Includes Naive2 baseline constants and OWA computation.
-- **`data/Traffic/`** — `TrafficDataset(BenchmarkDataset)` loader for PeMS Traffic (862 sensors, hourly). Downloads from Hugging Face on first use, caches at `~/.cache/lightningnbeats/Traffic/`. Parameterized by `horizon` (96, 192, 336, 720).
-- **`data/Weather/`** — `WeatherDataset(BenchmarkDataset)` loader for Weather (21 meteorological indicators, 10-min intervals). Downloads from Hugging Face on first use, caches at `~/.cache/lightningnbeats/Weather/`. Parameterized by `horizon` (96, 192, 336, 720).
+- **`data/Traffic/`** — `TrafficDataset(BenchmarkDataset)` loader for PeMS Traffic (862 sensors, hourly). Downloads from Hugging Face on first use, caches at `~/.cache/pe_nbeats/Traffic/`. Parameterized by `horizon` (96, 192, 336, 720).
+- **`data/Weather/`** — `WeatherDataset(BenchmarkDataset)` loader for Weather (21 meteorological indicators, 10-min intervals). Downloads from Hugging Face on first use, caches at `~/.cache/pe_nbeats/Weather/`. Parameterized by `horizon` (96, 192, 336, 720).
 - **`data/Tourism/`** — `TourismDataset(BenchmarkDataset)` loader for Tourism dataset. Columnar format (columns = series, rows = observations). Parameterized by `period` (Yearly, Quarterly, Monthly).
 - **`data/Milk/`** — `MilkDataset(BenchmarkDataset)` loader for the Milk Production univariate time series.
 
@@ -199,13 +199,23 @@ The `create_stack` method selects hidden layer width by block type:
 
 ### Adding a New Dataset
 
-1. Create a new directory under `src/lightningnbeats/data/<DatasetName>/` with `__init__.py` and a dataset module.
+1. Create a new directory under `src/pe_nbeats/data/<DatasetName>/` with `__init__.py` and a dataset module.
 2. Create a class inheriting from `BenchmarkDataset` in `data/benchmark_dataset.py`. Must set `train_data` (DataFrame, columnar), `test_data`, `forecast_length`, `frequency`, and `name`.
 3. Override `supports_owa = True` and `compute_owa()` if Naive2 baselines exist.
-4. Add the import to `src/lightningnbeats/data/__init__.py`.
+4. Add the import to `src/pe_nbeats/data/__init__.py`.
 5. In `experiments/run_unified_benchmark.py`: extend `load_dataset()` and add the dataset choice to the CLI `--dataset` argument. Create a YAML config in `experiments/configs/` to drive experiments via `run_from_yaml.py`.
 
 ## Empirical Defaults from M4 Sweeps
+
+### Headline (2026-07-28): parameter savings come from trunk width
+
+Supersedes the wavelet/AE framing in the tables below. Evidence: `trunk_width_attribution_2026-07-27.md`, `tourism_preset_validation_2026-07-28.md`, `nbeats_slim_recommendations.md`, `identity_basis_disclosure_2026-07-27.md`.
+
+- **Trunk width is the mechanism.** Width 2048→128 is accuracy-neutral on M4 (KW p≈0.78 over 48.8× params) and on Tourism. Width-matched basis comparisons are null; AE backbone and learned gate are null at matched budget. Exception: Traffic-96 improves with width (w128 26.49 → w512 25.45).
+- **Basis identity is inert at full forecast rank.** Default basis is `wavelet_type="dct"`. Legacy SVD wavelet bases scramble band order (`basis_offset` selects no band; use `"ordered:<family>"`), and coif2/sym10 (5/6 M4 periods) and db3 (H ≤ 8) are silently the identity. Both cases now emit `UserWarning`.
+- **Out-of-box API:** `NBeatsNet.slim(L, H, trend_branch=, rectify=, width=128)` and `NBeatsNet.from_recommendation(pe_nbeats.recommend(windows), L)`. Constructor defaults stay paper-faithful.
+- **`sum_losses`:** `val_loss`/`test_loss` are forecast-only since 0.2.0; combined objective logged as `val_total_loss`. Pre-0.2.0 `best_val_loss` for `sum_losses=True` rows includes the backcast term.
+- Per-period tables below remain valid as measured numbers, but wavelet-family labels for coif2/sym10 outside Hourly describe an identity basis.
 
 These are recommended starting points for new M4 experiments. Drawn from two complementary sweeps; full evidence in `experiments/analysis/analysis_reports/`.
 
@@ -266,4 +276,4 @@ Without these, paper-sample early-stopping fires on the first (warmup-corrupted)
 
 ## CI/CD
 
-GitHub Actions workflow (`.github/workflows/python-publish.yml`) publishes to PyPI on GitHub release using `pypa/gh-action-pypi-publish`. No tests or linting run in CI.
+GitHub Actions workflow (`.github/workflows/python-publish.yml`) runs the core test suite on CPU, builds, runs `twine check`, then publishes `pe-nbeats` to PyPI via Trusted Publishing on GitHub release. No linter is configured.

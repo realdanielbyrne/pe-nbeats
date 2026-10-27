@@ -15,7 +15,7 @@ import numpy as np, pandas as pd
 _DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_DIR, "..", "src"))
 
-from lightningnbeats.data import M4Dataset
+from pe_nbeats.data import M4Dataset
 
 # --- Metric functions (copied from run_unified_benchmark to avoid import) ---
 def compute_smape(y_pred, y_true):

@@ -1,53 +1,70 @@
 [build-system]
-requires = ["setuptools", "setuptools-scm"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 
 [project]
-name="lightningnbeats"
-version="0.1.3"
-authors =[{name="Daniel Byrne",email="realdanielbyrne@icloud.com"}]
-description = "PyTorch Lightning implementation of N-BEATS time series forecasting, extended with wavelet basis expansion, autoencoder blocks, and bottleneck architectures beyond the original paper."
-requires-python=">=3.12,<3.15"
-classifiers=[
+name = "pe-nbeats"
+version = "0.2.0"
+authors = [{name = "Daniel Byrne", email = "realdanielbyrne@icloud.com"}]
+description = "Right-sized N-BEATS and N-HiTS for PyTorch Lightning: narrow-trunk presets, a pre-flight configuration tool, and composable trend, DCT, wavelet and autoencoder basis blocks."
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12,<3.15"
+keywords = ["time series", "forecasting", "n-beats", "n-hits", "pytorch", "lightning", "deep learning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
-    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "Topic :: Software Development",
-    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
 ]
 dependencies = [
-  "lightning>=2.1.0",
-  "matplotlib",
-  "numpy",
-  "pandas",
-  "PyWavelets",
-  "scipy",
-  "seaborn",
-  "tensorboard",
-  "torch>=2.1.0",
-  "tqdm",
-  "wandb",
-  "ipykernel",
-  "ipython",
-  "statsmodels"
+    "lightning>=2.1.0",
+    "numpy",
+    "pandas",
+    "PyWavelets",
+    "torch>=2.1.0",
 ]
 dynamic = ["readme"]
 
 [project.optional-dependencies]
+viz = ["matplotlib", "seaborn"]
+experiments = ["pyyaml", "scipy", "statsmodels", "tensorboard", "tqdm", "wandb"]
+notebooks = ["ipykernel", "ipython", "matplotlib"]
 xpu = ["intel-extension-for-pytorch"]
+dev = ["build", "pytest", "pyyaml", "scipy", "twine"]
+all = ["pe-nbeats[viz,experiments,notebooks]"]
 
 [project.urls]
-"Homepage"="https://github.com/realdanielbyrne/N-BEATS-Lightning"
+Homepage = "https://github.com/realdanielbyrne/N-BEATS-Lightning"
+Issues = "https://github.com/realdanielbyrne/N-BEATS-Lightning/issues"
+Changelog = "https://github.com/realdanielbyrne/N-BEATS-Lightning/blob/main/CHANGELOG.md"
 
-[tool.setuptools]
-include-package-data = true
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pe_nbeats*", "lightningnbeats*"]
+
+[tool.setuptools.package-data]
+pe_nbeats = ["data/milk.csv", "data/tourism1/*.csv", "data/tourism2/*.csv"]
+
+[tool.setuptools.exclude-package-data]
+pe_nbeats = [
+    "data/M4/Train/*",
+    "data/M4/Test/*",
+    "data/M4/M4-info.csv",
+    "data/M4/docs/*",
+    "data/energy_dataset.csv",
+    "data/monthly-beer-production-in-austr.csv",
+    "data/sales-of-shampoo-over-a-three-ye.csv",
+    "data/daily-minimum-temperatures-in-me.csv",
+    "data/Electric_Production.csv",
+    "data/monthly-sunspots.csv",
+]
 
 [tool.setuptools.dynamic]
 readme = {file = ["README.md"], content-type = "text/markdown"}
-

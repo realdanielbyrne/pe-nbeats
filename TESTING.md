@@ -1,6 +1,6 @@
 # TESTING.md
 
-Testing conventions and procedures for this repository, intended for both human developers and AI coding agents working on `lightningnbeats`.
+Testing conventions and procedures for this repository, intended for both human developers and AI coding agents working on `pe_nbeats`.
 
 ## Overview
 
@@ -90,9 +90,9 @@ When you implement a new feature or fix a bug:
 
 If you add a new block type:
 
-1. add the block class in `src/lightningnbeats/blocks/blocks.py`
-2. add the block name to `src/lightningnbeats/constants.py`
-3. add any needed routing logic in `src/lightningnbeats/models.py`
+1. add the block class in `src/pe_nbeats/blocks/blocks.py`
+2. add the block name to `src/pe_nbeats/constants.py`
+3. add any needed routing logic in `src/pe_nbeats/models.py`
 4. add or update tests in `tests/test_blocks.py`
 
 `tests/test_blocks.py` contains the parametrized `TestAllBlocksOutputShapes` suite. If the new block is registered correctly and fits the existing constructor conventions, that parametrized test is often the first line of coverage for output-shape validation.
@@ -126,7 +126,7 @@ If imports fail unexpectedly, confirm the active interpreter is Python 3.12+ and
 
 ### Package not installed in the environment
 
-If `import lightningnbeats` fails, install the project into the active environment:
+If `import pe_nbeats` fails, install the project into the active environment:
 
 ```bash
 pip install -e .

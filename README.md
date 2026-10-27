@@ -1,10 +1,66 @@
-# PEN-BEATS Parameter Efficient N-BEATS
+# PE-NBEATS: Parameter-Efficient N-BEATS
 
-A [PyTorch Lightning](https://lightning.ai/docs/pytorch/stable/) implementation of [N-BEATS](https://arxiv.org/pdf/1905.10437.pdf) (Oreshkin et al., 2019) and `NHiTSNet`, extended with wavelet and autoencoder block families. Published as [`lightningnbeats`](https://pypi.org/project/lightningnbeats/) on PyPI.
+A [PyTorch Lightning](https://lightning.ai/docs/pytorch/stable/) implementation of [N-BEATS](https://arxiv.org/abs/1905.10437) (Oreshkin et al., 2020) and N-HiTS, built around one practical observation: **most of N-BEATS's parameters are not doing any work.**
 
-This library preserves the doubly residual stack architecture from the original paper and adds composable block families: orthonormal discrete wavelet transform (DWT) bases, polynomial–wavelet hybrids, and autoencoder backbones with learned-gate and variational variants. Blocks are freely composable via the `stack_types` list, enabling everything from paper-faithful reproductions to heavily compressed parameter-efficient stacks.
+The published configurations spend almost all of their budget on trunk width, the hidden size of each block's fully connected layers. Sweeping that width on M4 from 2048 down to 128 left accuracy statistically unchanged across a 49-fold range in parameter count, and the result held out of sample on Tourism. A model with a narrow trunk and a frozen orthonormal basis at full forecast rank therefore lands within noise of the paper baselines at roughly a tenth to a fiftieth of their size.
 
-The companion research paper, *Wavelets and Autoencoders are All You Need*, lives at [NBEATS-Explorations/paper.md](NBEATS-Explorations/paper.md) and contains the full empirical analysis, ablation evidence, and reproducibility artifacts. This README covers the library: installation, block families, hyperparameters, dataloaders, and usage patterns.
+PE-NBEATS packages that as a one-call preset, together with a pre-flight tool that reads your training windows and picks the settings that do matter. The full paper-faithful architecture and a large catalogue of research blocks (polynomial, Fourier, DCT, wavelet, autoencoder) remain available and freely composable.
+
+```bash
+pip install pe-nbeats
+```
+
+## Quickstart
+
+```python
+import lightning.pytorch as pl
+import numpy as np
+import torch
+
+from pe_nbeats import NBeatsNet, get_best_accelerator, recommend
+from pe_nbeats.data import MilkDataset
+from pe_nbeats.loaders import TimeSeriesDataModule
+
+milk = MilkDataset()                       # bundled monthly series, H = 6
+series = milk.train_data["milk"].to_numpy(dtype=np.float32)
+H, L = milk.forecast_length, 4 * milk.forecast_length
+
+# Measure the target before training. No GPU, no fitting.
+windows = np.lib.stride_tricks.sliding_window_view(series, H)
+rec = recommend(windows)
+print(rec.report())
+
+model = NBeatsNet.from_recommendation(rec, backcast_length=L)
+dm = TimeSeriesDataModule(series, batch_size=64, backcast_length=L, forecast_length=H)
+trainer = pl.Trainer(accelerator=get_best_accelerator(), devices=1, max_epochs=100)
+trainer.fit(model, datamodule=dm)
+
+model.eval()
+with torch.no_grad():
+    _, forecast = model(torch.from_numpy(series[-L:]).unsqueeze(0))
+```
+
+`recommend()` returns a `Recommendation` whose `report()` prints the measurements behind each choice, each tagged with how strongly the evidence supports it.
+
+## The slim preset
+
+`NBeatsNet.slim(backcast_length, forecast_length, ...)` builds the right-sized model directly:
+
+| Setting | Slim default | Paper default | Why |
+|---|---|---|---|
+| Trunk width | 128 | 512 (Generic), 2048 (Seasonality), 256 (Trend) | Accuracy-neutral from 128 to 2048 on M4 (Kruskal-Wallis p ≈ 0.78) and confirmed on Tourism. |
+| Stacks | 10 | 30 | 30 stacks bought nothing on any M4 period and destabilised the Generic family on Quarterly and Daily. |
+| Forecast head | frozen DCT basis at full rank | learned linear (Generic) or fixed Fourier/polynomial | At full rank the learned projection absorbs any rotation, so the choice of basis cannot limit accuracy. DCT is defined at every horizon. |
+| Trend branch | `trend_branch=` (off unless needed) | Trend stack in N-BEATS-I | Rescues targets whose energy sits almost entirely in the window mean; costs 0.3 to 0.6 sMAPE elsewhere. |
+| Rectified forecast | `rectify=` (off unless targets are non-negative) | off | Removes the collapse mode on non-negative series. Never use it on signed targets. |
+
+`trend_branch=True` alternates `Trend` and basis blocks, the analogue of N-BEATS-I+G. For a Milk-sized problem the result has about 0.54M parameters against 19.5M for N-BEATS-I+G. Every other `NBeatsNet` keyword (`loss`, `learning_rate`, `lr_scheduler_config`, …) passes through.
+
+```python
+model = NBeatsNet.slim(backcast_length=30, forecast_length=6, trend_branch=True, rectify=True)
+```
+
+**Where the narrow trunk does not hold.** On Traffic-96, a long-horizon target that does not compress, widening the trunk from 128 to 512 improved sMAPE by about 1.0. There is no validated way yet to predict this from the data alone, so when accuracy matters on a new dataset, try `width=128` and `width=512` on a held-out split. That is two runs, not a sweep.
 
 ## Requirements
 
@@ -12,28 +68,17 @@ The companion research paper, *Wavelets and Autoencoders are All You Need*, live
 - **PyTorch** ≥ 2.1.0
 - **Lightning** ≥ 2.1.0
 
-Supports CUDA, Apple MPS, Intel XPU, and CPU. `lightningnbeats.get_best_accelerator()` returns the highest-priority device available.
+Supports CUDA, Apple MPS, Intel XPU, and CPU. `pe_nbeats.get_best_accelerator()` returns the highest-priority device available.
 
-## Parameter efficiency
+Optional extras: `pe-nbeats[viz]` (matplotlib, seaborn), `pe-nbeats[experiments]` (wandb, tensorboard, scipy, statsmodels, pyyaml, tqdm, needed by `experiments/`), `pe-nbeats[notebooks]`, `pe-nbeats[all]`.
 
-The headline feature of this library is **60–95% parameter reduction** with no accuracy penalty on standard benchmarks.
-
-- **`AERootBlock`** replaces the paper's 4-layer FC trunk with an hourglass encoder–decoder (`input → U/2 → latent_dim → U/2 → U`).
-- **`AERootBlockLG`** adds a learned `sigmoid(gate) ⊙ z` mask after the latent layer, allowing the network to discover effective latent dimensionality during training. This means `latent_dim` can be kept small (e.g., 16–32) without accuracy loss.
-
-**Empirical result on M4**: a `TrendWaveletAELG` stack with `latent_dim=32`, `wavelet_type='db3'`, and 10 stacks lands within ~0.5% sMAPE of 19–43M-parameter paper baselines while using **0.48M parameters** (12–80× compression). The same AE backbones transfer cleanly to `NHiTSNet` and other architectures.
-
-For high-compression regimes, prefer `AERootBlockLG` over plain `AERootBlock`: the gate removes the need to hand-tune `latent_dim`, and at matched dimensions LG consistently matches or beats the ungated AE backbone across M4 periods.
-
-## Installation
+### From source
 
 ```bash
-pip install lightningnbeats         # from PyPI
-# or, from source for development:
 git clone https://github.com/realdanielbyrne/N-BEATS-Lightning.git
 cd N-BEATS-Lightning
 python -m venv .venv && source .venv/bin/activate
-pip install -e .
+pip install -e ".[dev,experiments]"
 ```
 
 ### CUDA
@@ -45,62 +90,54 @@ pip install -r requirements-cuda.txt                       # CUDA 12.8 (recommen
 # or pick a specific build:
 pip install torch --index-url https://download.pytorch.org/whl/cu128 --upgrade
 pip install torch --index-url https://download.pytorch.org/whl/cu121 --upgrade
-pip install torch --index-url https://download.pytorch.org/whl/cu118 --upgrade
 ```
 
 Match your driver at [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/).
 
-## Quickstart
+### Multi-GPU
+
+The last block's backcast head never reaches the loss, which is inherent to the doubly residual design. Lightning's default DDP strategy rejects unused parameters, so either pass `devices=1` or use `strategy="ddp_find_unused_parameters_true"`.
+
+### Migrating from `lightningnbeats`
+
+This package was previously published as `lightningnbeats`. `import lightningnbeats` still works through a compatibility alias that emits a `DeprecationWarning`; replace it with `import pe_nbeats`. Cached Traffic and Weather downloads under `~/.cache/lightningnbeats/` are reused.
+
+## Paper-faithful N-BEATS
+
+`stack_types` takes any list of registered block names, so the original architectures are one line each:
 
 ```python
-from lightningnbeats import NBeatsNet, get_best_accelerator
-from lightningnbeats.loaders import TimeSeriesDataModule
-import lightning.pytorch as pl
-import pandas as pd
-
-milk = pd.read_csv('src/lightningnbeats/data/Milk/milk.csv', index_col=0).values.flatten()
-forecast_length, backcast_length = 6, 24
-
-model = NBeatsNet(
-    stack_types=['Trend', 'Seasonality'],
-    backcast_length=backcast_length,
-    forecast_length=forecast_length,
-    n_blocks_per_stack=3,
-    thetas_dim=5,
-    share_weights=True,
-)
-
-dm = TimeSeriesDataModule(
-    train_data=milk[:-forecast_length],
-    val_data=milk[-(forecast_length + backcast_length):],
-    backcast_length=backcast_length,
-    forecast_length=forecast_length,
-    batch_size=64,
-    shuffle=True,
-)
-
-trainer = pl.Trainer(accelerator=get_best_accelerator(), max_epochs=100)
-trainer.fit(model, datamodule=dm)
+NBeatsNet(L, H, stack_types=["Generic"] * 30)                                   # N-BEATS-G
+NBeatsNet(L, H, stack_types=["Trend", "Seasonality"], n_blocks_per_stack=3,
+          share_weights=True)                                                    # N-BEATS-I
+NBeatsNet(L, H, stack_types=["Trend", "Seasonality"] + ["Generic"] * 8)          # N-BEATS-I+G
 ```
 
-`stack_types` is required — there is no default architecture. Any combination of registered block names is legal; blocks compose freely in any order.
+Constructor defaults (`g_width=512`, `s_width=2048`, `t_width=256`) match the paper, so existing configurations reproduce unchanged. `NHiTSNet` accepts the same blocks and adds multi-rate input pooling (`n_pools_kernel_size`) and hierarchical interpolation (`n_freq_downsample`).
 
-## Block reference
+## Pre-flight check
 
-Every entry in [`constants.BLOCKS`](src/lightningnbeats/constants.py) is a valid `stack_types` string and maps to a concrete class in [`src/lightningnbeats/blocks/blocks.py`](src/lightningnbeats/blocks/blocks.py).
+`pe_nbeats.recommend(windows, forecast_length=None)` computes two quantities from horizon-length windows of the training split:
+
+- **Effective rank**, roughly how many basis coefficients carry the signal. Below about 4 a plain linear head may fail to train, and the recommendation turns the trend branch on.
+- **Window-mean share**, the fraction of target energy in the window mean. Above one half it also turns the trend branch on.
+
+It turns the rectified head on only when every window is non-negative, and always recommends DCT at full forecast rank with a 128-wide trunk. `pe_nbeats.analyze(windows)` returns the raw statistics without a recommendation.
+
+## Research blocks
+
+Every entry in `pe_nbeats.constants.BLOCKS` is a valid `stack_types` string. They are kept for reproducibility and experimentation. Read the caveats before relying on any of them for accuracy.
 
 ### Backbones
 
 | Backbone | Topology | Notes |
 |---|---|---|
-| `RootBlock` | input → U → U → U → U | Paper-faithful 4-layer FC trunk. |
-| `AERootBlock` | input → U/2 → d → U/2 → U | Hourglass; `latent_dim` controls bottleneck `d`. |
-| `AERootBlockLG` | same as AE | Adds learned `sigmoid(γ) ⊙ z` gate; allows smaller `d` without accuracy loss. |
-| `AERootBlockVAE` | μ/logσ heads, reparameterization | KL loss accumulated and added during `training_step`, scaled by `kl_weight` (default `0.1`). |
+| `RootBlock` | input → U → U → U → U | Paper-faithful 4-layer trunk. |
+| `AERootBlock` | input → U/2 → d → U/2 → U | Hourglass trunk; `latent_dim` sets `d`. |
+| `AERootBlockLG` | as AE | Adds a learned `sigmoid(γ) ⊙ z` gate on the latent. |
+| `AERootBlockVAE` | μ/log σ² heads | Stochastic latent; KL term scaled by `kl_weight`. **Experimental.** |
 
-### Block families
-
-Each backbone is paired with the same set of basis-expansion heads:
+### Families
 
 | Family | RootBlock | AERootBlock | AERootBlockLG | AERootBlockVAE |
 | --- | --- | --- | --- | --- |
@@ -110,367 +147,113 @@ Each backbone is paired with the same set of basis-expansion heads:
 | Branch-specific AE | `AutoEncoder` | `AutoEncoderAE` | `AutoEncoderAELG` | `AutoEncoderVAE` |
 | Trend (polynomial) | `Trend` | `TrendAE` | `TrendAELG` | `TrendVAE` |
 | Seasonality (Fourier) | `Seasonality` | `SeasonalityAE` | `SeasonalityAELG` | `SeasonalityVAE` |
-| Wavelet (DWT) | `WaveletV3` | `WaveletV3AE` | `WaveletV3AELG` | `WaveletV3VAE` |
-| Trend + Wavelet | `TrendWavelet` | `TrendWaveletAE` | `TrendWaveletAELG` | — |
-| Trend + Wavelet + Generic | `TrendWaveletGeneric` | `TrendWaveletGenericAE` | `TrendWaveletGenericAELG` | `TrendWaveletGenericVAE` |
+| Frozen basis (DCT / wavelet / random) | `WaveletV3` | `WaveletV3AE` | `WaveletV3AELG` | `WaveletV3VAE` |
+| Trend + frozen basis | `TrendWavelet` | `TrendWaveletAE` | `TrendWaveletAELG` | — |
+| Trend + frozen basis + Generic | `TrendWaveletGeneric` | `TrendWaveletGenericAE` | `TrendWaveletGenericAELG` | `TrendWaveletGenericVAE` |
 
-`WaveletV3` is the recommended public API: pass `wavelet_type` (e.g. `'haar'`, `'db3'`, `'coif2'`, `'sym10'`). Family-named subclasses (`HaarWaveletV3`, `DB3WaveletV3`, `Coif2WaveletV3`, `Symlet10WaveletV3`, …) remain as compatibility wrappers and are listed in `BLOCKS`. V1/V2 wavelet families were removed for instability; V2 results are preserved under `experiments/results/` for reference.
+`WaveletV3` and the `TrendWavelet*` families take `wavelet_type`, which accepts:
 
-For short forecast targets, prefer short-support wavelets (`haar`, `db2`, `db3`). When `pywt.dwt_max_level(...) == 0`, `_WaveletGeneratorV3` keeps `level=0` (approximation-only orthonormal basis) rather than forcing an invalid level-1 decomposition.
+- `"dct"`: orthonormal DCT-II, ordered low to high frequency. Recommended.
+- `"random_ortho"` or `"random_ortho:<seed>"`: a seeded random orthonormal basis.
+- `"ordered:<family>"`, e.g. `"ordered:haar"`: a periodized DWT basis that keeps the dyadic band order, so `basis_offset` selects a frequency band.
+- `"<family>"`, e.g. `"haar"` or `"db3"`: the legacy SVD-orthogonalised DWT basis, kept so earlier results reproduce.
 
-### Composing stacks
+Family-named subclasses (`HaarWaveletV3`, `DB3WaveletV3`, …) remain as compatibility wrappers.
 
-```python
-# Pure generic (paper-equivalent at depth 30)
-NBeatsNet(stack_types=['Generic'] * 30, ...)
+### What the evidence says about these blocks
 
-# Interpretable (Trend + Seasonality)
-NBeatsNet(stack_types=['Trend', 'Seasonality'], n_blocks_per_stack=3, share_weights=True, ...)
-
-# Alternating Trend + Wavelet (RootBlock)
-NBeatsNet(stack_types=['Trend', 'DB3WaveletV3'] * 5, ...)
-
-# Unified TrendWavelet (single composite block)
-NBeatsNet(stack_types=['TrendWavelet'] * 30, wavelet_type='sym10', trend_thetas_dim=3, basis_dim=H, ...)
-
-# Sub-1M parameter compact model
-NBeatsNet(
-    stack_types=['TrendWaveletAELG'] * 10,
-    wavelet_type='db3', trend_thetas_dim=3, basis_dim=H, latent_dim=32,
-    share_weights=True, ...,
-)
-
-# Asymmetric wavelets for L >> H
-NBeatsNet(
-    stack_types=['WaveletV3AELG'] * 10,
-    wavelet_type='coif2',
-    backcast_wavelet_type='sym20', forecast_wavelet_type='coif2',
-    ...,
-)
-```
-
-> **Convention.** Place `Trend*` stacks before `Wavelet*` / `Generic*` / `Seasonality*` stacks. The block-ordering ablation (paper Appendix B.5) found Trend-first either neutral or strongly preferred on every dataset; reversing it can 2–3× the OWA on VAE backbones.
-
-## Hyperparameters
+- **Basis identity is inert at full forecast rank.** Wavelet families were a well-powered null against each other, and a random orthonormal basis performs as well as any wavelet. The DCT default is an engineering choice, not an accuracy claim.
+- **Wavelets need room to decompose.** When `pywt.dwt_max_level(H, filter_length) == 0` the basis has no multiscale structure and is effectively the identity. `coif2` and `sym10` hit this at every M4 horizon except Hourly, and `db3` at H ≤ 8. The library now warns when it happens.
+- **The legacy SVD path scrambles band order.** With `"<family>"` bases, `basis_offset` does not pick a frequency band, and the library warns when one is set. Use `"ordered:<family>"`.
+- **Autoencoder trunks and the learned gate are not the source of the savings.** At matched parameter budgets they do not beat a plain narrow trunk, and the gate was null across twelve comparisons. Use them when the latent dimension itself is the constraint.
+- **VAE blocks collapse on M4** (5 to 10 times worse sMAPE). Treat them as experimental.
+- **`active_g="forecast"`** rectifies the forecast output. It is safe only when each block's output should be non-negative. Never combine it with signed, cancelling components such as DWT sub-band inputs. `active_g=True`, which also rectifies the backcast, costs accuracy.
+- **`sum_losses=True`** adds `0.25 · L(backcast, 0)` to the training loss. `val_loss` and `test_loss` always report the forecast loss alone; the combined objective is logged as `val_total_loss`.
+- **`skip_distance` / `skip_alpha`** reinject the input every few stacks. They have not helped on M4 and are off by default.
 
 ### Width and dimension parameters
 
-| Parameter | Default | Applies to | Description |
-|---|---|---|---|
-| `g_width` | 512 | Generic / BottleneckGeneric / GenericAEBackcast / Wavelet families | Hidden units for Generic-type and Wavelet blocks. |
-| `s_width` | 2048 | Seasonality / SeasonalityAE | Hidden units for Seasonality blocks (larger because Fourier basis is dense). |
-| `t_width` | 256 | Trend / TrendAE / TrendWavelet / TrendWaveletGeneric families | Hidden units for Trend-type blocks. |
-| `ae_width` | 512 | AutoEncoder / AutoEncoderAE | Hidden units for branch-specific AutoEncoder blocks. |
-| `latent_dim` | 5 | AE / LG / VAE backbones | Bottleneck width `d` in the encoder–decoder. In `AutoEncoderAE` and `GenericAEBackcastAE` it controls the branch-local AE latents. |
-| `thetas_dim` | 3 | BottleneckGeneric / GenericAEBackcast* | Rank of the explicit theta/basis-coefficient projection (bottleneck factorization). |
-| `trend_thetas_dim` | 3 | Trend*and TrendWavelet* families | Polynomial order (number of trend basis functions). |
-| `basis_dim` | 32 | WaveletV3 and TrendWavelet* families | Wavelet basis rank `k` per path. |
-| `forecast_basis_dim` | `None` | Wavelet families | Optional override for forecast-path basis rank. When `None`, both paths use `basis_dim`. |
-| `generic_dim` | — | TrendWaveletGeneric* | Rank of the learned generic branch in the three-way decomposition. |
+| Parameter | Default | Applies to |
+|---|---|---|
+| `g_width` | 512 | Generic, BottleneckGeneric, GenericAEBackcast, frozen-basis blocks |
+| `s_width` | 2048 | Seasonality family |
+| `t_width` | 256 | Trend and TrendWavelet* families |
+| `ae_width` | 512 | AutoEncoder family |
+| `latent_dim` | 5 | AE / LG / VAE backbones |
+| `thetas_dim` | 5 | Generic-type theta projections |
+| `trend_thetas_dim` | 3 | Polynomial order for Trend and TrendWavelet* |
+| `basis_dim` | 32 | Backcast basis rank (and forecast rank unless overridden) |
+| `forecast_basis_dim` | `None` | Forecast basis rank; set to `forecast_length` for full rank |
+| `generic_dim` | 5 | Learned branch rank in TrendWaveletGeneric* |
 
-### Recommended settings
+## Losses
 
-- **Stack ordering** — Place `Trend*` stacks before `Wavelet*` / `Generic*` / `Seasonality*` stacks. The block-ordering ablation found Trend-first either neutral or strongly preferred on every dataset; reversing it can 2–3× the OWA on VAE backbones.
-- **`active_g`** — Default `False` (paper-faithful). Use `'forecast'` (`active_g='forecast'`) specifically on M4-Hourly and for some Generic convergence rescues; it is not a global default and can regress on other periods.
-- **High compression** — Use `AERootBlockLG` with `latent_dim=16–32` and `share_weights=True` for the best parameter-efficiency frontier. A 10-stack `TrendWaveletAELG` configuration is the recommended starting point for <1M-parameter targets.
-- **AE vs LG** — `AERootBlockLG` matches or beats plain `AERootBlock` at matched `latent_dim`. Prefer LG when `latent_dim` is the binding constraint.
-- **VAE backbones** — The VAE family is strictly unusable on M4 (55–68 sMAPE collapse). Reserve for exploratory or non-M4 use cases only.
-- **Wavelet shortlist for M4** — `haar`, `db3`, `coif2`, `sym10`. `coif3` produces no per-period SOTA and can be omitted from default sweeps.
-- **Short targets** — Prefer `haar`, `db2`, `db3` when `forecast_length` is small; long-support families (`sym20`, `db20`, `coif10`) degrade to approximation-only bases.
+Besides the standard `torch.nn` losses, `loss=` accepts `"SMAPELoss"`, `"MAPELoss"`, `"MASELoss"` and `"NormalizedDeviationLoss"`.
 
-### Selected extensions (cross-references to the paper)
+## Data
 
-These knobs are repository extensions and not part of Oreshkin et al. (2019). See the paper's appendices for empirical evidence.
-
-- **`skip_distance` / `skip_alpha`** — ResNet-style reinjection of the original input every `skip_distance` stacks, scaled by `skip_alpha` (float or `'learnable'`). Useful for `GenericAELG` at depth ≥ 20; off by default.
-- **`sum_losses`** — Adds `0.25 · L(backcast, 0)` to the loss to push backcasts toward full reconstruction. Off by default; reserved for convergence studies.
-- **Asymmetric wavelet families** — `backcast_wavelet_type` and `forecast_wavelet_type` override `wavelet_type` per path. Useful when `L ≫ H` (e.g., Traffic-96: L=480, H=96).
-- **Tiered basis offsets** (`basis_offset`) — Cycle each stack through a different SVD spectrum slice of the orthonormal wavelet basis. Strongest on M4-Daily under paper-sample; regresses on Weekly.
-
-## Custom losses
-
-In addition to the standard `torch.nn` losses, the package registers `SMAPELoss`, `MAPELoss`, `MASELoss` (accepts `seasonal_period`), and `NormalizedDeviationLoss`. Select by name via the `loss=` argument.
-
-## Data and dataloaders
-
-The library provides three `LightningDataModule` implementations tailored to different dataset layouts. Pick the one that matches your data orientation.
-
-### `TimeSeriesDataModule` — single univariate series
-
-For a single time series (e.g., the bundled Milk dataset). Splits the series into sliding windows and performs an 80/20 random train/validation split.
+### Bundled and downloadable datasets
 
 ```python
-from lightningnbeats.loaders import TimeSeriesDataModule
-import pandas as pd
+from pe_nbeats.data import M4Dataset, MilkDataset, TourismDataset, TrafficDataset, WeatherDataset
 
-series = pd.read_csv('milk.csv', index_col=0).values.flatten()
-forecast_length, backcast_length = 6, 24
-
-dm = TimeSeriesDataModule(
-    train_data=series[:-forecast_length],
-    val_data=series[-(forecast_length + backcast_length):],
-    backcast_length=backcast_length,
-    forecast_length=forecast_length,
-    batch_size=64,
-)
+MilkDataset()                    # bundled
+TourismDataset("Quarterly")      # bundled
+M4Dataset("Yearly")              # downloaded from the official M4 repository on first use
+TrafficDataset(horizon=96)       # downloaded from Hugging Face on first use
+WeatherDataset(horizon=96)       # downloaded from Hugging Face on first use
 ```
 
-### `RowCollectionTimeSeriesDataModule` — row-oriented collections
+Downloads are cached under `~/.cache/pe_nbeats/`. Every dataset exposes `train_data` and `test_data` as DataFrames with one column per series, plus `forecast_length` and `frequency`. `M4Dataset` also provides `compute_owa(smape, mase)`.
 
-For datasets where **rows = series** and **columns = time observations**. Each row is an independent time series; windows are sampled across all rows. The validation split takes the last `backcast_length + forecast_length` columns of every series. This matches the M4 competition format.
+### DataModules
 
-```python
-from lightningnbeats.data import M4Dataset
-from lightningnbeats.loaders import RowCollectionTimeSeriesDataModule
-
-m4 = M4Dataset('Yearly', 'All')
-backcast_length = m4.forecast_length * 5
-
-dm = RowCollectionTimeSeriesDataModule(
-    data=m4.train_data,
-    backcast_length=backcast_length,
-    forecast_length=m4.forecast_length,
-    batch_size=2048,
-    split_ratio=0.8,
-)
-```
-
-For test-time evaluation, use `RowCollectionTimeSeriesTestModule` to concatenate the last `backcast_length` observations from the training matrix with the first `forecast_length` test observations:
+- `TimeSeriesDataModule(data, batch_size, backcast_length, forecast_length)`: one univariate series, sliding windows with a random 80/20 split.
+- `ColumnarCollectionTimeSeriesDataModule(dataframe, backcast_length, forecast_length, ...)`: many series stored as columns (M4, Tourism, Traffic, Weather as loaded above). It supports normalisation (`normalization_style="global"` or `"window"`), a dedicated `val_data`, and paper-style sampling (`sampling_style="nbeats_paper"`).
+- `ColumnarCollectionTimeSeriesTestDataModule(train_data, test_data, ...)`: joins the tail of each training series to its test horizon for evaluation.
+- `RowCollectionTimeSeriesDataModule` / `RowCollectionTimeSeriesTestModule`: the same for data with one row per series.
 
 ```python
-from lightningnbeats.loaders import RowCollectionTimeSeriesTestModule
-
-test_dm = RowCollectionTimeSeriesTestModule(
-    train_data=m4.train_data,
-    test_data=m4.test_data,
-    backcast_length=backcast_length,
-    forecast_length=m4.forecast_length,
-    batch_size=2048,
-)
-```
-
-### `ColumnarCollectionTimeSeriesDataModule` — column-oriented collections
-
-For datasets where **columns = series** and **rows = time observations**. This is the layout used by Tourism, Traffic, and Weather. Supports optional normalization (`normalization_style='global'` for per-column z-score, `'window'` for RevIN-style per-window z-score), dedicated validation splits, and N-BEATS paper-style insample constraints.
-
-```python
-from lightningnbeats.data import TrafficDataset
-from lightningnbeats.loaders import (
+from pe_nbeats import NBeatsNet, get_best_accelerator
+from pe_nbeats.data import M4Dataset
+from pe_nbeats.loaders import (
     ColumnarCollectionTimeSeriesDataModule,
     ColumnarCollectionTimeSeriesTestDataModule,
 )
-
-traffic = TrafficDataset(horizon=96)
-backcast_length = 96 * 5
-
-dm = ColumnarCollectionTimeSeriesDataModule(
-    dataframe=traffic.train_data,
-    backcast_length=backcast_length,
-    forecast_length=traffic.forecast_length,
-    batch_size=1024,
-)
-
-test_dm = ColumnarCollectionTimeSeriesTestDataModule(
-    train_data=traffic.train_data,
-    test_data=traffic.test_data,
-    backcast_length=backcast_length,
-    forecast_length=traffic.forecast_length,
-    batch_size=1024,
-)
-```
-
-## Usage examples
-
-### Standard N-BEATS interpretable (Trend + Seasonality)
-
-```python
-from lightningnbeats import NBeatsNet, get_best_accelerator
-from lightningnbeats.loaders import TimeSeriesDataModule
-import lightning.pytorch as pl
-import pandas as pd
-
-milk = pd.read_csv('src/lightningnbeats/data/Milk/milk.csv', index_col=0).values.flatten()
-H, L = 6, 24
-
-model = NBeatsNet(
-    stack_types=['Trend', 'Seasonality'],
-    backcast_length=L,
-    forecast_length=H,
-    n_blocks_per_stack=3,
-    thetas_dim=5,
-    share_weights=True,
-)
-
-dm = TimeSeriesDataModule(
-    train_data=milk[:-H],
-    val_data=milk[-(H + L):],
-    backcast_length=L,
-    forecast_length=H,
-    batch_size=64,
-)
-
-trainer = pl.Trainer(accelerator=get_best_accelerator(), max_epochs=100)
-trainer.fit(model, datamodule=dm)
-```
-
-### High-compression `TrendWaveletAELG`
-
-```python
-from lightningnbeats import NBeatsNet, get_best_accelerator
-from lightningnbeats.loaders import TimeSeriesDataModule
-import lightning.pytorch as pl
-import pandas as pd
-
-milk = pd.read_csv('src/lightningnbeats/data/Milk/milk.csv', index_col=0).values.flatten()
-H, L = 6, 24
-
-model = NBeatsNet(
-    stack_types=['TrendWaveletAELG'] * 10,
-    backcast_length=L,
-    forecast_length=H,
-    wavelet_type='db3',
-    trend_thetas_dim=3,
-    basis_dim=H,
-    latent_dim=32,
-    share_weights=True,
-)
-
-dm = TimeSeriesDataModule(
-    train_data=milk[:-H],
-    val_data=milk[-(H + L):],
-    backcast_length=L,
-    forecast_length=H,
-    batch_size=64,
-)
-
-trainer = pl.Trainer(accelerator=get_best_accelerator(), max_epochs=100)
-trainer.fit(model, datamodule=dm)
-```
-
-### M4-style row-oriented dataset
-
-```python
-from lightningnbeats import NBeatsNet, get_best_accelerator
-from lightningnbeats.data import M4Dataset
-from lightningnbeats.loaders import (
-    RowCollectionTimeSeriesDataModule,
-    RowCollectionTimeSeriesTestModule,
-)
 import lightning.pytorch as pl
 
-m4 = M4Dataset('Yearly', 'All')
+m4 = M4Dataset("Yearly")
 H = m4.forecast_length
-L = H * 5
+L = 5 * H
 
-model = NBeatsNet(
-    stack_types=['Trend', 'DB3WaveletV3'] * 5,
-    backcast_length=L,
-    forecast_length=H,
-)
+model = NBeatsNet.slim(L, H, trend_branch=True, rectify=True)
+dm = ColumnarCollectionTimeSeriesDataModule(m4.train_data, L, H, batch_size=1024)
+test_dm = ColumnarCollectionTimeSeriesTestDataModule(m4.train_data, m4.test_data, L, H, batch_size=1024)
 
-dm = RowCollectionTimeSeriesDataModule(
-    data=m4.train_data,
-    backcast_length=L,
-    forecast_length=H,
-    batch_size=2048,
-)
-
-test_dm = RowCollectionTimeSeriesTestModule(
-    train_data=m4.train_data,
-    test_data=m4.test_data,
-    backcast_length=L,
-    forecast_length=H,
-    batch_size=2048,
-)
-
-trainer = pl.Trainer(accelerator=get_best_accelerator(), max_epochs=50)
-trainer.fit(model, datamodule=dm)
-trainer.test(model, datamodule=test_dm)
-```
-
-### Traffic / Weather column-oriented dataset
-
-```python
-from lightningnbeats import NBeatsNet, get_best_accelerator
-from lightningnbeats.data import TrafficDataset
-from lightningnbeats.loaders import (
-    ColumnarCollectionTimeSeriesDataModule,
-    ColumnarCollectionTimeSeriesTestDataModule,
-)
-import lightning.pytorch as pl
-
-traffic = TrafficDataset(horizon=96)
-H = traffic.forecast_length
-L = H * 5
-
-model = NBeatsNet(
-    stack_types=['TrendWaveletAELG'] * 10,
-    backcast_length=L,
-    forecast_length=H,
-    wavelet_type='db3',
-    trend_thetas_dim=3,
-    basis_dim=H,
-    latent_dim=32,
-    share_weights=True,
-)
-
-dm = ColumnarCollectionTimeSeriesDataModule(
-    dataframe=traffic.train_data,
-    backcast_length=L,
-    forecast_length=H,
-    batch_size=1024,
-)
-
-test_dm = ColumnarCollectionTimeSeriesTestDataModule(
-    train_data=traffic.train_data,
-    test_data=traffic.test_data,
-    backcast_length=L,
-    forecast_length=H,
-    batch_size=1024,
-)
-
-trainer = pl.Trainer(accelerator=get_best_accelerator(), max_epochs=50)
+trainer = pl.Trainer(accelerator=get_best_accelerator(), devices=1, max_epochs=50)
 trainer.fit(model, datamodule=dm)
 trainer.test(model, datamodule=test_dm)
 ```
 
 ## Experiments
 
-Reproducing or extending the paper's sweeps is driven by YAML through [`experiments/run_from_yaml.py`](experiments/run_from_yaml.py):
+The repository's benchmark sweeps are driven by YAML through `experiments/run_from_yaml.py`. Install with `pip install -e ".[experiments]"`.
 
 ```bash
 python experiments/run_from_yaml.py experiments/configs/nbeats_g.yaml --dry-run
-python experiments/run_from_yaml.py experiments/configs/nbeats_g.yaml
-python experiments/run_from_yaml.py experiments/configs/genericae_pure.yaml          # successive halving
-python experiments/run_from_yaml.py experiments/configs/trendae_ae_alternating.yaml
-python experiments/run_from_yaml.py experiments/configs/nbeats_g.yaml --analyze-only # no retraining
+python experiments/run_from_yaml.py experiments/configs/tourism_preset_validation.yaml
 ```
 
-The launcher supports two-pass studies, atomic claim files for parallel workers, search/successive-halving rounds, custom CSV columns, and full CLI overrides. Schema reference: [`experiments/configs/schema.md`](experiments/configs/schema.md). Canonical training-protocol YAMLs (sliding, paper-sample MultiStepLR, paper-sample plateau) and their reproducibility CSVs are listed in [paper.md Appendix B.9](NBEATS-Explorations/paper.md).
+The schema reference is in [`experiments/configs/schema.md`](experiments/configs/schema.md), and analysis reports are in [`experiments/analysis/analysis_reports/`](experiments/analysis/analysis_reports/).
 
-Examples in [`examples/`](examples/) (`#%%` cell markers, runnable as scripts or in Jupyter):
+## Development
 
 ```bash
-python examples/M4AllBlks.py
-python examples/TourismAllBlks.py
+pytest tests/
 ```
 
-## Testing
+Conventions are in [TESTING.md](TESTING.md). To add a block, subclass `RootBlock`, `AERootBlock`, `AERootBlockLG` or `AERootBlockVAE` in `src/pe_nbeats/blocks/blocks.py` and return `(backcast, forecast)` from `forward()`. Then register the name in `BLOCKS` in `src/pe_nbeats/constants.py`. The parametrised shape tests pick it up automatically.
 
-```bash
-pytest tests/                         # all
-pytest tests/test_blocks.py -v        # block shapes / registries
-```
+## License
 
-Conventions and troubleshooting: [TESTING.md](TESTING.md). CI does not run tests; no linter or formatter is configured.
-
-## Adding a new block
-
-1. Create the class in [`src/lightningnbeats/blocks/blocks.py`](src/lightningnbeats/blocks/blocks.py), inheriting from `RootBlock`, `AERootBlock`, `AERootBlockLG`, or `AERootBlockVAE`. `forward()` must return `(backcast, forecast)`.
-2. Add the class name to `BLOCKS` in [`constants.py`](src/lightningnbeats/constants.py).
-3. If a new width parameter is needed, extend the dispatch in `NBeatsNet.create_stack()`.
-4. Add a shape test; the parametrized `TestAllBlocksOutputShapes` picks up new entries automatically.
-
-## Citation
-
-If the wavelet / AE block families or the parameter-efficiency results are useful in your work, please cite *Wavelets and Autoencoders are All You Need* — see [NBEATS-Explorations/paper.md](NBEATS-Explorations/paper.md) for the canonical text and reproducibility pointers.
+MIT

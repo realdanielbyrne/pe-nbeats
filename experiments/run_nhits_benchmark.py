@@ -76,12 +76,12 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 # Allow running from project root or experiments/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from lightningnbeats.models import NBeatsNet, NHiTSNet
-from lightningnbeats.loaders import (
+from pe_nbeats.models import NBeatsNet, NHiTSNet
+from pe_nbeats.loaders import (
     ColumnarCollectionTimeSeriesDataModule,
     ColumnarCollectionTimeSeriesTestDataModule,
 )
-from lightningnbeats.data import TrafficDataset, WeatherDataset
+from pe_nbeats.data import TrafficDataset, WeatherDataset
 
 torch.set_float32_matmul_precision("medium")
 

@@ -1,7 +1,7 @@
 #%%
-from lightningnbeats import NBeatsNet
-from lightningnbeats.loaders import *
-from lightningnbeats.losses import *
+from pe_nbeats import NBeatsNet
+from pe_nbeats.loaders import *
+from pe_nbeats.losses import *
 from tqdm.notebook import tqdm
 tqdm.pandas()
 import tensorboard

@@ -1,14 +1,14 @@
 """Tests for block implementations — activation, instantiation, forward pass, attribute names."""
 import warnings
 
-import lightningnbeats
+import pe_nbeats
 import numpy as np
 import pytest
 import torch
 from torch import nn
 
-from lightningnbeats.blocks import blocks as b
-from lightningnbeats.constants import ACTIVATIONS
+from pe_nbeats.blocks import blocks as b
+from pe_nbeats.constants import ACTIVATIONS
 
 
 BACKCAST_LENGTH = 20
@@ -496,12 +496,12 @@ class TestBlocksRegistry:
     """Verify every entry in BLOCKS has a corresponding class in blocks module."""
 
     def test_all_blocks_have_classes(self):
-        from lightningnbeats.constants import BLOCKS
+        from pe_nbeats.constants import BLOCKS
         for block_name in BLOCKS:
             assert hasattr(b, block_name), f"Block class {block_name} not found in blocks module"
 
     def test_all_block_classes_instantiable(self):
-        from lightningnbeats.constants import BLOCKS
+        from pe_nbeats.constants import BLOCKS
         for block_name in BLOCKS:
             block_class = getattr(b, block_name)
             assert callable(block_class), f"Block {block_name} is not callable"
@@ -511,8 +511,8 @@ class TestLossesRegistry:
     """Verify every entry in LOSSES has a corresponding class."""
 
     def test_all_losses_exist(self):
-        from lightningnbeats.constants import LOSSES
-        from lightningnbeats import losses
+        from pe_nbeats.constants import LOSSES
+        from pe_nbeats import losses
         import torch.nn as nn
 
         for loss_name in LOSSES:
@@ -659,7 +659,7 @@ class TestDeprecatedVAE2Access:
 
     def test_root_package_lookup_raises_deprecation_message(self):
         with pytest.raises(AttributeError, match="deprecated and removed"):
-            getattr(lightningnbeats, "GenericVAE2")
+            getattr(pe_nbeats, "GenericVAE2")
 
 
 # --- AERootBlockLG / AERootBlockVAE property tests ---
@@ -1414,7 +1414,7 @@ class TestOrderedBasisFullRank:
     @pytest.mark.parametrize("length", [4, 6, 8, 12, 13, 14, 18, 24, 48, 96, 240])
     @pytest.mark.parametrize("family", ["haar", "db2", "db3"])
     def test_ordered_basis_is_square(self, length, family):
-        from lightningnbeats.blocks.blocks import _WaveletGeneratorV3
+        from pe_nbeats.blocks.blocks import _WaveletGeneratorV3
 
         gen = _WaveletGeneratorV3(length, f"ordered:{family}")
         assert gen.basis.shape[0] == length, (
@@ -1426,7 +1426,7 @@ class TestOrderedBasisFullRank:
     def test_ordered_basis_is_orthonormal(self, length):
         import torch
 
-        from lightningnbeats.blocks.blocks import _WaveletGeneratorV3
+        from pe_nbeats.blocks.blocks import _WaveletGeneratorV3
 
         b = _WaveletGeneratorV3(length, "ordered:haar").basis.double()
         gram = b @ b.T
@@ -1564,3 +1564,35 @@ class TestAEIntermediateWidth:
         )
         assert block.fc1.out_features == 512 // 2
         assert block.fc1b.out_features == 512 // 4
+
+
+# --- WaveletV3 basis guard warnings ---
+
+
+class TestWaveletBasisGuards:
+    """Silent degenerate bases must warn rather than pass unnoticed."""
+
+    def test_level_zero_wavelet_warns(self):
+        from pe_nbeats.blocks.blocks import _WaveletGeneratorV3
+
+        with pytest.warns(UserWarning, match="no decomposition"):
+            _WaveletGeneratorV3._build_basis(6, "sym10", 5)
+
+    def test_offset_on_svd_basis_warns(self):
+        from pe_nbeats.blocks.blocks import _WaveletGeneratorV3
+
+        with pytest.warns(UserWarning, match="does not select a frequency band"):
+            _WaveletGeneratorV3._build_basis(48, "db3", 5, None, 4)
+
+    @pytest.mark.parametrize("kind", ["dct", "ordered:db3"])
+    def test_structured_bases_do_not_warn(self, kind, recwarn):
+        from pe_nbeats.blocks.blocks import _WaveletGeneratorV3
+
+        _WaveletGeneratorV3._build_basis(48, kind, 5, None, 4)
+        assert not [w for w in recwarn if issubclass(w.category, UserWarning)]
+
+    def test_valid_wavelet_without_offset_does_not_warn(self, recwarn):
+        from pe_nbeats.blocks.blocks import _WaveletGeneratorV3
+
+        _WaveletGeneratorV3._build_basis(48, "db3", 5)
+        assert not [w for w in recwarn if issubclass(w.category, UserWarning)]

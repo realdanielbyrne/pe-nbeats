@@ -171,7 +171,7 @@ Forecast (Generic path):
 
 **Paper difference:** The paper defines only polynomial and Fourier bases.
 
-**Status update:** V1 and V2 wavelet blocks were removed due to instability (NaN failures, MASE explosion) documented in `NBEATS-Explorations/paper.md` Section 5.1.3. Use V3 (orthonormal DWT) variants. Historical V2 results are retained in `experiments/results/` for reference.
+**Status update:** V1 and V2 wavelet blocks were removed due to instability (NaN failures, MASE explosion) documented in the companion paper (private `pe-nbeats-paper` repo).1.3. Use V3 (orthonormal DWT) variants. Historical V2 results are retained in `experiments/results/` for reference.
 
 ### Historical Variant 1 (Removed): `WaveletV2` (Square Basis + Learned Downsampling + Stabilization)
 

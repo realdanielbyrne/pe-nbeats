@@ -20,7 +20,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CSV_PATH = os.path.join(
     ROOT, "experiments", "results", "m4", "comprehensive_sweep_m4_results.csv"
 )
-OUT_DIR = os.path.join(ROOT, "NBEATS-Explorations", "figures")
+OUT_DIR = os.path.join(os.path.dirname(ROOT), "pe-nbeats-paper", "figures")  # sibling private paper repo
 FIG5_PATH = os.path.join(OUT_DIR, "figure5_m4_training_curves.svg")
 
 

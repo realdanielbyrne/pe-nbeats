@@ -4,7 +4,7 @@ Guidance for coding agents working in this repository.
 
 ## Project Overview
 
-PyTorch Lightning implementation of the N-BEATS (Neural Basis Expansion Analysis for Time Series) forecasting algorithm, published as the `lightningnbeats` PyPI package. Extends the original paper with wavelet basis expansion blocks, autoencoder variants, bottleneck generic blocks, and fully customizable stack compositions.
+PyTorch Lightning implementation of the N-BEATS (Neural Basis Expansion Analysis for Time Series) forecasting algorithm, published as the `pe-nbeats` PyPI package (import `pe_nbeats`; formerly `lightningnbeats`). Extends the original paper with wavelet basis expansion blocks, autoencoder variants, bottleneck generic blocks, and fully customizable stack compositions.
 
 ## Requirements
 
@@ -12,13 +12,13 @@ PyTorch Lightning implementation of the N-BEATS (Neural Basis Expansion Analysis
 - PyTorch >= 2.1.0
 - Lightning >= 2.1.0
 
-Supports CUDA, MPS, and CPU. The `get_best_accelerator()` utility in `src/lightningnbeats/__init__.py` detects the best available accelerator (CUDA > MPS > CPU).
+Supports CUDA, MPS, and CPU. The `get_best_accelerator()` utility in `src/pe_nbeats/__init__.py` detects the best available accelerator (CUDA > MPS > CPU).
 
 ## Build & Install
 
 ```bash
 pip install -e .
-pip install lightningnbeats
+pip install pe-nbeats
 python -m build
 ```
 
@@ -70,11 +70,11 @@ pytest tests/test_blocks.py -k "test_output_shapes"
 
 For the complete testing guide, including conventions for adding coverage and common troubleshooting tips, see [`TESTING.md`](TESTING.md).
 
-Test files: `test_blocks.py` (block shapes, attributes, registries), `test_loaders.py` (DataModule setup, splits), `test_models.py` (width selection, optimizer dispatch, forward pass, sum_losses). CI does not run tests before publishing. No linter or formatter is configured.
+Test files: `test_blocks.py` (block shapes, attributes, registries), `test_loaders.py` (DataModule setup, splits), `test_models.py` (width selection, optimizer dispatch, forward pass, sum_losses). No linter or formatter is configured.
 
 ## Architecture
 
-### Package Structure (`src/lightningnbeats/`)
+### Package Structure (`src/pe_nbeats/`)
 
 - `models.py`: `NBeatsNet(pl.LightningModule)` main model. Accepts `stack_types` list of strings to define architecture. Handles forward pass with backward/forward residual connections, training/validation/test steps, loss configuration, and optimizer setup.
 - `blocks/blocks.py`: all block implementations (largest file). Two parallel inheritance hierarchies:
@@ -95,8 +95,8 @@ Test files: `test_blocks.py` (block shapes, attributes, registries), `test_loade
 - `constants.py`: string registries `ACTIVATIONS`, `LOSSES`, `OPTIMIZERS`, `BLOCKS`
 - `data/benchmark_dataset.py`: `BenchmarkDataset(ABC)` interface for datasets.
 - `data/M4/`: `M4Dataset` loader with bundled CSV data files for all 6 M4 periods. Includes Naive2 baseline constants and OWA computation.
-- `data/Traffic/`: `TrafficDataset` loader for PeMS Traffic. Downloads from Hugging Face on first use, caches at `~/.cache/lightningnbeats/Traffic/`. Parameterized by `horizon`.
-- `data/Weather/`: `WeatherDataset` loader for Weather. Downloads from Hugging Face on first use, caches at `~/.cache/lightningnbeats/Weather/`. Parameterized by `horizon`.
+- `data/Traffic/`: `TrafficDataset` loader for PeMS Traffic. Downloads from Hugging Face on first use, caches at `~/.cache/pe_nbeats/Traffic/`. Parameterized by `horizon`.
+- `data/Weather/`: `WeatherDataset` loader for Weather. Downloads from Hugging Face on first use, caches at `~/.cache/pe_nbeats/Weather/`. Parameterized by `horizon`.
 
 ### Key Design Patterns
 
@@ -123,19 +123,19 @@ Test files: `test_blocks.py` (block shapes, attributes, registries), `test_loade
 
 ## Adding a New Block Type
 
-1. Create the block class in `src/lightningnbeats/blocks/blocks.py`, inheriting from `RootBlock`, `AERootBlock`, `AERootBlockLG`, or `AERootBlockVAE`. Implement `forward()` returning `(backcast, forecast)`.
-2. Add the class name string to the `BLOCKS` list in `src/lightningnbeats/constants.py`.
-3. If the block needs a new width parameter, add the mapping in `NBeatsNet.create_stack()` in `src/lightningnbeats/models.py`.
+1. Create the block class in `src/pe_nbeats/blocks/blocks.py`, inheriting from `RootBlock`, `AERootBlock`, `AERootBlockLG`, or `AERootBlockVAE`. Implement `forward()` returning `(backcast, forecast)`.
+2. Add the class name string to the `BLOCKS` list in `src/pe_nbeats/constants.py`.
+3. If the block needs a new width parameter, add the mapping in `NBeatsNet.create_stack()` in `src/pe_nbeats/models.py`.
 4. Add a shape test in `tests/test_blocks.py`. The parametrized `TestAllBlocksOutputShapes` will cover it if it's in `BLOCKS`.
 
 ## Adding a New Dataset
 
-1. Create a new directory under `src/lightningnbeats/data/<DatasetName>/` with `__init__.py` and a dataset module.
-2. Create a class inheriting from `BenchmarkDataset` in `src/lightningnbeats/data/benchmark_dataset.py`. Set `train_data`, `test_data`, `forecast_length`, `frequency`, and `name`.
+1. Create a new directory under `src/pe_nbeats/data/<DatasetName>/` with `__init__.py` and a dataset module.
+2. Create a class inheriting from `BenchmarkDataset` in `src/pe_nbeats/data/benchmark_dataset.py`. Set `train_data`, `test_data`, `forecast_length`, `frequency`, and `name`.
 3. Override `supports_owa = True` and `compute_owa()` if Naive2 baselines exist.
-4. Add the import to `src/lightningnbeats/data/__init__.py`.
+4. Add the import to `src/pe_nbeats/data/__init__.py`.
 5. In `experiments/run_experiments.py`: add a horizons dict, add to `DATASET_DEFAULTS`, extend `load_dataset()`, and add the dataset choice to the CLI `--dataset` argument.
 
 ## CI/CD
 
-GitHub Actions workflow in `.github/workflows/python-publish.yml` publishes to PyPI on GitHub release using `pypa/gh-action-pypi-publish`. No tests or linting run in CI.
+GitHub Actions workflow in `.github/workflows/python-publish.yml` runs the core tests on CPU, builds, runs `twine check`, and publishes `pe-nbeats` to PyPI via Trusted Publishing on GitHub release.

@@ -8,7 +8,7 @@ that the trunk recommendation is NOT keyed to compressibility.
 import numpy as np
 import pytest
 
-from lightningnbeats.preflight import analyze, recommend
+from pe_nbeats.preflight import analyze, recommend
 
 
 @pytest.fixture

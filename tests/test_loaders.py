@@ -8,7 +8,7 @@ import pandas as pd
 import torch
 from torch.utils.data import RandomSampler, WeightedRandomSampler
 
-from lightningnbeats.loaders import (
+from pe_nbeats.loaders import (
     ColumnarCollectionTimeSeriesDataModule,
     ColumnarCollectionTimeSeriesTestDataModule,
     RowCollectionTimeSeriesDataModule,

@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from run_unified_benchmark import load_dataset  # noqa: E402
 
-from lightningnbeats.loaders import ColumnarCollectionTimeSeriesDataModule  # noqa: E402
+from pe_nbeats.loaders import ColumnarCollectionTimeSeriesDataModule  # noqa: E402
 
 
 def collect_windows(dataset, backcast_length, forecast_length, normalize, max_windows):

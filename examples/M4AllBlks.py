@@ -1,8 +1,8 @@
 #%%
-from lightningnbeats.models import *                   
-from lightningnbeats.loaders import *
-from lightningnbeats.losses import *
-from lightningnbeats.data import M4Dataset
+from pe_nbeats.models import *                   
+from pe_nbeats.loaders import *
+from pe_nbeats.losses import *
+from pe_nbeats.data import M4Dataset
 from tqdm.notebook import tqdm
 tqdm.pandas()
 import tensorboard

@@ -1,0 +1,21 @@
+# Final release of the old `lightningnbeats` name. It contains no code and only
+# depends on `pe-nbeats`, which ships a `lightningnbeats` compatibility alias.
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lightningnbeats"
+version = "0.2.0"
+description = "Renamed to pe-nbeats. Installing this pulls in pe-nbeats."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12,<3.15"
+dependencies = ["pe-nbeats>=0.2.0"]
+classifiers = ["Development Status :: 7 - Inactive"]
+
+[project.urls]
+Homepage = "https://pypi.org/project/pe-nbeats/"
+
+[tool.setuptools]
+packages = []

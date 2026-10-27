@@ -36,8 +36,8 @@ from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 _EXPERIMENTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_EXPERIMENTS_DIR, "..", "src"))
 
-from lightningnbeats.models import NBeatsNet
-from lightningnbeats.loaders import TimeSeriesDataModule
+from pe_nbeats.models import NBeatsNet
+from pe_nbeats.loaders import TimeSeriesDataModule
 
 
 class MetaForecaster:

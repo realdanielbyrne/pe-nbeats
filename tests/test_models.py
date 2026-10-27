@@ -1,10 +1,11 @@
 """Tests for NBeatsNet and NHiTSNet models — width selection, optimizer dispatch, NHiTS semantics."""
 
+import numpy as np
 import pytest
 import torch
 from torch import optim
 
-from lightningnbeats.models import NBeatsNet, NHiTSNet
+from pe_nbeats.models import NBeatsNet, NHiTSNet
 
 
 def _make_model(stack_types, **kwargs):
@@ -469,6 +470,21 @@ class TestSumLossesBehavior:
         assert loss is not None
         assert isinstance(loss, torch.Tensor)
 
+    @pytest.mark.parametrize("step", ["validation_step", "test_step"])
+    def test_sum_losses_does_not_change_eval_loss(self, step):
+        """Eval loss is forecast-only, so it is comparable across sum_losses."""
+        torch.manual_seed(0)
+        plain = _make_model(["Generic"], sum_losses=False, g_width=32, no_val=False)
+        summed = _make_model(["Generic"], sum_losses=True, g_width=32, no_val=False)
+        summed.load_state_dict(plain.state_dict())
+        x = torch.randn(4, 20) + 10.0
+        y = torch.randn(4, 5) + 10.0
+
+        loss_plain = getattr(plain, step)((x, y), 0)
+        loss_summed = getattr(summed, step)((x, y), 0)
+
+        assert torch.equal(loss_plain, loss_summed)
+
 
 # --- KL weighting tests ---
 
@@ -582,7 +598,7 @@ class TestNormalizedDeviationLossConfiguration:
     """Verify NormalizedDeviationLoss is handled in configure_loss."""
 
     def test_model_with_normalized_deviation_loss(self):
-        from lightningnbeats.losses import NormalizedDeviationLoss
+        from pe_nbeats.losses import NormalizedDeviationLoss
 
         model = _make_model(["Generic"], loss="NormalizedDeviationLoss", g_width=32)
         assert isinstance(model.loss_fn, NormalizedDeviationLoss)
@@ -1679,3 +1695,61 @@ class TestNHiTSSkipConnections:
     def test_nhits_skip_alpha_invalid_string_raises(self):
         with pytest.raises(ValueError, match="skip_alpha must be"):
             _make_nhits(["Generic"], skip_distance=1, skip_alpha="bad")
+
+
+# --- Slim preset tests ---
+
+
+class TestSlimPreset:
+    """NBeatsNet.slim and NBeatsNet.from_recommendation."""
+
+    @pytest.mark.parametrize("trend_branch", [False, True])
+    def test_forward_shapes(self, trend_branch):
+        model = NBeatsNet.slim(30, 6, trend_branch=trend_branch)
+        backcast, forecast = model(torch.randn(4, 30))
+        assert backcast.shape == (4, 30)
+        assert forecast.shape == (4, 6)
+
+    def test_stack_layout(self):
+        assert NBeatsNet.slim(30, 6).stack_types == ["WaveletV3"] * 10
+        assert NBeatsNet.slim(30, 6, trend_branch=True).stack_types == [
+            "Trend",
+            "WaveletV3",
+        ] * 5
+
+    def test_far_smaller_than_paper_ig(self):
+        def n_params(m):
+            return sum(p.numel() for p in m.parameters() if p.requires_grad)
+
+        slim = NBeatsNet.slim(30, 6, trend_branch=True)
+        paper = NBeatsNet(
+            30, 6, stack_types=["Trend", "Seasonality"] + ["Generic"] * 8
+        )
+        assert n_params(slim) < 1_000_000
+        assert n_params(slim) * 10 < n_params(paper)
+
+    def test_rectify_sets_forecast_active_g(self):
+        assert NBeatsNet.slim(30, 6, rectify=True).active_g == "forecast"
+        assert NBeatsNet.slim(30, 6).active_g is False
+
+    def test_kwargs_pass_through(self):
+        model = NBeatsNet.slim(30, 6, width=64, learning_rate=0.01)
+        assert model.g_width == 64
+        assert model.learning_rate == 0.01
+
+    def test_odd_stacks_with_trend_branch_raises(self):
+        with pytest.raises(ValueError):
+            NBeatsNet.slim(30, 6, trend_branch=True, n_stacks=9)
+
+    def test_from_recommendation(self):
+        from pe_nbeats.preflight import recommend
+
+        rng = np.random.default_rng(0)
+        windows = np.abs(rng.normal(100.0, 10.0, (2000, 6)))
+        rec = recommend(windows)
+        model = NBeatsNet.from_recommendation(rec, backcast_length=30)
+        assert model.forecast_length == 6
+        assert model.g_width == rec.recommended_trunk_width
+        assert ("Trend" in model.stack_types) == rec.needs_trend_branch
+        _, forecast = model(torch.randn(4, 30))
+        assert forecast.shape == (4, 6)

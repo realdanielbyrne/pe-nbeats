@@ -54,8 +54,8 @@ from lightning.pytorch import loggers as pl_loggers
 # Allow running from project root or experiments/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from lightningnbeats.models import NBeatsNet
-from lightningnbeats.loaders import TimeSeriesDataModule
+from pe_nbeats.models import NBeatsNet
+from pe_nbeats.loaders import TimeSeriesDataModule
 
 torch.set_float32_matmul_precision("medium")
 
@@ -94,7 +94,7 @@ MILK_SUMLOSS_CONFIGS = {
 # Paths
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results", "milk_sumloss_convergence")
 MILK_CSV_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "src", "lightningnbeats", "data", "milk.csv"
+    os.path.dirname(__file__), "..", "src", "pe_nbeats", "data", "milk.csv"
 )
 
 # CSV schema — extends milk convergence study with sum_losses column
