@@ -1,0 +1,32 @@
+# One-off: publish the final `lightningnbeats` release, an empty package that
+# depends on `pe-nbeats`. Run manually from the Actions tab. Uses the legacy
+# PYPI_API_TOKEN secret, which predates Trusted Publishing for that project.
+
+name: Publish lightningnbeats redirect
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Build and check
+      working-directory: packaging/lightningnbeats-redirect
+      run: |
+        python -m pip install --upgrade pip build twine
+        python -m build
+        twine check dist/*
+    - name: Publish package
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        packages-dir: packaging/lightningnbeats-redirect/dist/
+        password: ${{ secrets.PYPI_API_TOKEN }}
