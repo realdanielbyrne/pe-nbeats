@@ -41,9 +41,9 @@ dev = ["build", "pytest", "pyyaml", "scipy", "twine"]
 all = ["pe-nbeats[viz,experiments,notebooks]"]
 
 [project.urls]
-Homepage = "https://github.com/realdanielbyrne/N-BEATS-Lightning"
-Issues = "https://github.com/realdanielbyrne/N-BEATS-Lightning/issues"
-Changelog = "https://github.com/realdanielbyrne/N-BEATS-Lightning/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/realdanielbyrne/pe-nbeats"
+Issues = "https://github.com/realdanielbyrne/pe-nbeats/issues"
+Changelog = "https://github.com/realdanielbyrne/pe-nbeats/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]

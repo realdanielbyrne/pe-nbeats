@@ -2,7 +2,7 @@
 #
 # Publishing uses PyPI Trusted Publishing (OIDC), so no API token is stored.
 # One-time setup on PyPI: add a (pending) trusted publisher for project
-# "pe-nbeats" with owner "realdanielbyrne", repository "N-BEATS-Lightning",
+# "pe-nbeats" with owner "realdanielbyrne", repository "pe-nbeats",
 # workflow "python-publish.yml" and environment "pypi".
 
 name: Upload Python Package

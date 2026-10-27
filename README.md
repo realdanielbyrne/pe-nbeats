@@ -75,8 +75,8 @@ Optional extras: `pe-nbeats[viz]` (matplotlib, seaborn), `pe-nbeats[experiments]
 ### From source
 
 ```bash
-git clone https://github.com/realdanielbyrne/N-BEATS-Lightning.git
-cd N-BEATS-Lightning
+git clone https://github.com/realdanielbyrne/pe-nbeats.git
+cd pe-nbeats
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,experiments]"
 ```
