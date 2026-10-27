@@ -57,21 +57,79 @@ class TestParseStackTypes:
 # ---------------------------------------------------------------------------
 
 class TestLoadYamlConfigs:
-    """Tests for load_yaml_configs function."""
+    """Tests for load_yaml_configs function.
+
+    Uses a self-contained fixture YAML rather than the live experiment
+    configs under experiments/configs/, which are edited routinely and
+    previously made these tests fail whenever a sweep changed shape.
+    """
+
+    _WEATHER_LIKE_YAML = """
+experiment_name: NHiTS-Protocol-Weather-Fixture
+dataset: weather
+horizons: [96, 192, 336, 720]
+
+protocol:
+  normalize: true
+  train_ratio: 0.7
+  val_ratio: 0.1
+  include_target: true
+  loss: MSELoss
+  forecast_multiplier: 5
+  batch_size: 256
+
+training:
+  max_epochs: 100
+  patience: 10
+  activation: ReLU
+  active_g: false
+  sum_losses: false
+
+block_params:
+  thetas_dim: 5
+  latent_dim: 16
+  basis_dim: eq_fcast
+
+runs:
+  n_runs: 8
+  base_seed: 1
+
+configs:
+  - name: Generic-10
+    stack_types: "['Generic'] * 10"
+  - name: TrendAELG+Sym20V3AELG
+    stack_types: "['TrendAELG', 'Symlet20WaveletV3AELG'] * 5"
+  - name: NHiTS-Generic
+    model: NHiTSNet
+    stack_types: "['NHiTSGenericRoot'] * 3"
+    n_pools_kernel_size: [8, 4, 1]
+    n_freq_downsample: [24, 12, 1]
+"""
+
+    _TRAFFIC_LIKE_YAML = """
+experiment_name: NHiTS-Protocol-Traffic-Fixture
+dataset: traffic
+horizons: [96]
+
+protocol:
+  normalize: false
+
+configs:
+  - name: Generic-10
+    stack_types: "['Generic'] * 10"
+"""
 
     @pytest.fixture
-    def weather_yaml_path(self):
-        return os.path.join(
-            os.path.dirname(__file__), "..", "experiments", "configs",
-            "nhits_benchmark_weather.yaml"
-        )
+    def weather_yaml_path(self, tmp_path):
+        path = tmp_path / "nhits_benchmark_weather_fixture.yaml"
+        path.write_text(self._WEATHER_LIKE_YAML)
+        return str(path)
 
     @pytest.fixture
-    def traffic_yaml_path(self):
-        return os.path.join(
-            os.path.dirname(__file__), "..", "experiments", "configs",
-            "nhits_benchmark_traffic.yaml"
-        )
+    def traffic_yaml_path(self, tmp_path):
+        path = tmp_path / "nhits_benchmark_traffic_fixture.yaml"
+        path.write_text(self._TRAFFIC_LIKE_YAML)
+        return str(path)
 
     def test_loads_weather_yaml(self, weather_yaml_path):
         """Should load all configs and protocol from weather YAML."""
@@ -96,9 +154,9 @@ class TestLoadYamlConfigs:
         assert p["normalize"] is True
 
     def test_weather_configs_count(self, weather_yaml_path):
-        """Weather YAML should have 18 configs."""
+        """Fixture YAML should have 3 configs."""
         result = rnb.load_yaml_configs(weather_yaml_path)
-        assert len(result["configs"]) == 18
+        assert len(result["configs"]) == 3
 
     def test_traffic_normalize_false(self, traffic_yaml_path):
         """Traffic YAML should have normalize=false."""

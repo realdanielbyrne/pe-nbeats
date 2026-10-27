@@ -1,0 +1,73 @@
+% Section 7 — Out-of-Sample: The Pre-Registered Tourism Test
+% Numbers sourced from: paper_rewrite_plan.md §6 (§6 subplan, Tourism bullet), §19
+% (corrections table, trend-branch row), §20 (Tourism preset validation row);
+% response_AC.md Point 1; response_ovPT.md "Out of sample".
+
+\section{Out-of-Sample: The Pre-Registered Tourism Test}\label{sec:tourism}
+
+The findings of the preceding sections condense to a single compact configuration,
+fixed in writing before the test began: ten stacks, a 128-wide trunk, a frozen
+complete-rank forecast basis ($\df = \Ho$) of any family, a truncated backcast basis
+($\db < \L$), a rectified output head, and a paired trend branch. No element of this
+configuration was adjusted on the test data. The test bed is the Tourism competition
+set: 1{,}311 series across the Yearly, Quarterly, and Monthly horizons, evaluated over
+240 runs and three horizons. Because the configuration and the acceptance criteria
+predate the runs, the test distinguishes what the preceding measurements actually
+predict from what they merely describe.
+
+Four predictions were registered alongside the configuration.
+Table~\ref{tab:tourism_predictions} lists each with its registered value and its
+outcome. Two of four registered predictions failed and are reported as failures.
+
+\begin{table}[t]
+  \centering
+  \caption{Registered predictions for the pre-registered Tourism out-of-sample test
+    and their outcomes. The registered acceptance threshold for P1 was 0.5 \smape{}
+    against the better of the two reference baselines, N-BEATS-G and N-BEATS-I+G
+    (Oreshkin et al., 2020). Two of the four predictions failed; both failures are
+    reported as failures rather than rescoped.}
+  \label{tab:tourism_predictions}
+  \begin{tabular}{@{}p{0.26\linewidth}p{0.34\linewidth}p{0.34\linewidth}@{}}
+    \toprule
+    Prediction & Registered value & Outcome \\
+    \midrule
+    P1: the compact preset matches the better baseline
+      & Within 0.5 \smape{} of the better baseline on all three horizons, at
+        14--15$\times$ fewer parameters
+      & \textbf{Confirmed} on all three horizons; zero collapses in 240 runs \\
+    \addlinespace
+    P2: the narrow trunk holds
+      & $\U = 128$ against $\U = 512$
+      & \textbf{Confirmed} on all three horizons; significant on Quarterly only
+        (uncorrected $p = 0.031$) \\
+    \addlinespace
+    P3: the paired trend branch is required
+      & Branch always on
+      & \textbf{Failed}; demoted to conditional. The branch costs 0.344 \smape{} on
+        Quarterly ($p = 0.021$) and 0.609 on Monthly ($p = 0.0073$); what it buys is
+        tail protection at the shortest horizon, where at $\Ho = 4$ it cuts the
+        per-seed standard deviation from 8.12 to 0.46 \\
+    \addlinespace
+    P4: parity between the in-block basis design and the sub-band design
+      & Budget-matched parity
+      & \textbf{Failed}; the in-block basis wins outright
+        (Sec.~\ref{sec:scoped}) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Interpretation.}
+The trunk result of Sec.~\ref{sec:trunk} holds out of sample. A measurement taken on
+M4 Yearly and Monthly --- trunk width inert far below the published defaults ---
+predicted the behavior of a dataset family it had never seen, with no retuning: the
+128-wide trunk matches or beats the 512-wide trunk on every horizon, and the one
+significant cell favors the narrow trunk. The trend branch, by contrast, is
+conditional rather than universal. On the two longer horizons it is a significant
+cost, 0.3--0.6 \smape{}; at the shortest horizon it is the difference between a stable
+configuration and an unstable one. The carried-forward rule is therefore keyed to the
+conditions that predict the failure --- low effective rank or a dominant window mean
+--- not applied unconditionally. The zero-collapse count is likewise read at its
+registered scope: the rectified head removed the sign-failure mode of
+Sec.~\ref{sec:trainability} on this non-negative target domain, which is the mode it
+was designed to remove. All generality evidence in this section is scoped to
+forecasting.

@@ -15,5 +15,8 @@
       "Bash(grep *)",
       "Skill(update-config)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "graft"
+  ]
 }

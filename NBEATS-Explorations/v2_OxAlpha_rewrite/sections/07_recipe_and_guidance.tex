@@ -1,0 +1,120 @@
+% =========================================================================
+% Practitioner recipe fragment for "Frozen Basis Time Series Forecasting"
+% (camera-ready rewrite of NeurIPS submission 30981).
+%
+% Governing documents: paper_rewrite_plan.md §6 subplan for the recipe
+% section and Part II §17--§18; notation_and_taxonomy_spec.md §7.4
+% (DCT-default rule); rebuttal responses (ovPT out-of-sample paragraph,
+% y8d1 Q4 tiering verdict, K8yb Qiv taper disclosure).
+%
+% DECISION GATES honoured: the recipe lives in the MAIN TEXT with a boxed
+% quick-pick summary; the box uses \fbox{\parbox{...}} because tcolorbox
+% is not among the permitted packages.
+%
+% Drop-list entries are prose descriptions, never encoded configuration
+% names (spec §4).
+% =========================================================================
+
+\section{A Practitioner's Recipe}
+\label{sec:recipe}
+
+Everything measured in this paper reduces to a short procedure for
+configuring an N-BEATS model on a new forecasting task. The two integers
+are the forecast rank and the backcast rank; the trunk choice is its
+width. This section states the defaults, when to deviate from them, and
+what never helped.
+
+\noindent\fbox{\parbox{0.975\linewidth}{%
+\textbf{Quick pick --- N-BEATS-Slim.}
+\begin{itemize}\itemsep 1pt
+\item Ten stacks, one block per stack, weights shared within stacks.
+\item Uniform trunk width 128.
+\item Frozen \emph{complete-rank} discrete cosine basis on the forecast
+  head ($d_f = H$); truncated backcast basis at $H$ or $2H$ rows.
+\item Rectified output head whenever the target is non-negative.
+\item Trend branch only if the effective rank of the target window is
+  low or the window mean dominates; otherwise omit it.
+\item Trend stacks before basis-only stacks.
+\item Adam, learning rate $10^{-3}$; plateau schedule on Quarterly,
+  Monthly and Daily, fixed milestones elsewhere
+  (Table~\ref{tab:lr_per_period}).
+\end{itemize}
+On M4 this preset sits within 0.05 sMAPE of its baseline per period at
+15 to 74 times fewer parameters, and it held out of sample on Tourism
+within the registered margin at 14 to 15 times fewer parameters with
+zero collapses.
+}}
+
+\paragraph{Choosing the basis.}
+At complete forecast rank the basis identity is provably inert, so do
+not tune it. Use the discrete cosine basis by default, for one
+operational reason rather than an accuracy reason: it is defined at
+every horizon and cannot silently degenerate. A discrete wavelet
+transform asked for a target shorter than its filter can act on returns
+a valid orthonormal basis whose every row has support one, which is the
+identity matrix wearing a wavelet's name; several headline cells of the
+submitted version were exactly that. If the basis must be something else,
+any complete orthonormal choice synthesizes the same forecasts.
+
+\paragraph{Choosing the ranks.}
+Set the forecast rank to the horizon unless parameters must be cut. When
+truncating, captured energy --- the share of target energy the retained
+rows span --- predicts trained accuracy without inversion, so compute it
+before training. The law is exact where it has been tested. At
+one-third forecast rank on M4-Hourly, four bases at byte-identical
+parameter counts order by capture with no inversion: Karhunen--Lo\`eve
+$10.054 \pm 0.130$, discrete cosine $10.287 \pm 0.097$, band-ordered
+Daubechies~3 $10.580 \pm 0.102$, and the same wavelet under
+singular-value row ordering at 73.946, every adjacent pair at
+$p = 0.0078$. On M4-Hourly, sweeping the retained fraction from 0.125
+to 1.000 moves sMAPE monotonically from 106.81 to 9.31 at $p = 0.002$
+per rung, and on Traffic-96 five bases at identical parameter counts
+order exactly by capture (Spearman $\rho = -1.0$, exact $p = 0.017$ at
+$n = 5$; run level $\rho = -0.98$ over 25 runs, $p = 9.0 \times
+10^{-18}$). The backcast rank is far less sensitive; $H$ or $2H$ rows
+against a $3$--$5H$ lookback is standard. Check effective rank next: it
+predicts trainability at $\rho = +0.949$, and bases concentrating their
+energy in one direction fail on every seed regardless of captured
+energy.
+
+\paragraph{Choosing the width.}
+Use 128. Width is inert across a 48.8-fold range (Kruskal--Wallis
+$p = 0.776$ and $p = 0.773$), so spend capacity on stacks rather than
+units. An AE-trunk bottleneck buys no accuracy at matched budget; choose
+it only where its small latent layer serves a parameter budget or a
+storage constraint, and then prefer a latent dimension of 16 over 32.
+
+\paragraph{The trend branch is conditional.}
+Treat the polynomial trend branch as insurance bought where targets are
+concentrated, not as a default. On Tourism it significantly costs 0.344
+sMAPE on Quarterly and 0.609 on Monthly against our registered
+prediction that it was free; it earns its keep only at very short
+horizons, where it cuts the seed spread at $H = 4$ from 8.12 to 0.46.
+Low effective rank or a dominant window mean are the signals that
+justify switching it on.
+
+\paragraph{Tiering, if any.}
+If basis rows are distributed across stacks, tier by rank, taking the
+leading rows in every stack. Rank tiering lifts mean per-block captured
+energy from 0.200 to 1.000 for an ordered basis and beats offset tiering
+by 0.138 sMAPE at $p = 0.037$; offset tiering discards leading rows and
+only survives where row order is unaligned with energy.
+
+\paragraph{Pre-flight check.}
+Both predictive quantities are computable from the basis matrices and
+the training data alone. The repository ships a pre-flight utility that
+reports captured energy and effective rank for a proposed configuration
+before any training run, so a truncation that will not train is caught
+at config time; we propose exposing the preset above as a single
+constructor profile.
+
+\paragraph{Drop list.}
+The following repeatedly failed or bought nothing at matched budget and
+should not be re-derived from scratch: the bottleneck-generic family;
+pure generic autoencoder stacks; the variational family, which was
+catastrophic on M4 at five to ten times the baseline error; skip
+connections across a distance of five stacks; and per-period basis-family
+shortlists beyond the defaults, since no family produced a per-period win
+that survives identity marking. Comparisons across the auxiliary
+backcast-loss flag and across normalization regimes are excluded from
+this paper's evidence entirely and should be excluded from yours.

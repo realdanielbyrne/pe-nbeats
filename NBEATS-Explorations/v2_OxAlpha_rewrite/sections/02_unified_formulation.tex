@@ -1,0 +1,357 @@
+% ---------------------------------------------------------------------------
+% Section 2: the unified formulation ("Frozen Basis Time Series Forecasting").
+% Implements notation_and_taxonomy_spec.md §2–§5, §7; paper_rewrite_plan.md
+% §6 subplan "§2 The Method" and §13 step 3.
+% Symbol closure: every symbol is defined exactly once in
+% Table~\ref{tab:dimensions}; quantities outside it are either derived
+% (\hat{x}, \hat{y}, block index ell) or locally defined pre-training-predictor
+% notation (Sec. method_predictors). No retired symbol (sigma, gamma, Psi)
+% appears anywhere in this fragment.
+% ---------------------------------------------------------------------------
+
+\section{The Method: Two Integers and a Trunk Choice}
+\label{sec:method}
+
+N-BEATS \citep{oreshkin2020nbeats} reads a time series through a doubly
+residual stack of blocks. Each block receives the current residual stream
+$\mathbf{x}$, emits a backcast $\hat{\mathbf{x}}$ of the input window and a
+forecast $\hat{\mathbf{y}}$ of the horizon, passes $\mathbf{x} -
+\hat{\mathbf{x}}$ downstream, and contributes $\hat{\mathbf{y}}$ to the model
+forecast. Throughout this paper the \emph{trunk} is the multilayer mapping
+inside a block that turns its input into a hidden representation, and the
+\emph{basis} is a fixed matrix whose rows span everything a block is allowed
+to emit. The submitted version spread the description of these blocks across
+three sections; this section states the method once, before any variant is
+named.
+
+Every block in this paper computes the same three steps,
+\begin{equation}
+\label{eq:formulation}
+\underbrace{\mathbf{h} = \operatorname{trunk}(\mathbf{x})}_{\text{trunk}};\qquad
+\underbrace{\boldsymbol{\theta}_b = \mathbf{W}_b\,\mathbf{h},\;\;
+\boldsymbol{\theta}_f = \mathbf{W}_f\,\mathbf{h}}_{\text{learned, unconstrained}};\qquad
+\underbrace{\hat{\mathbf{x}} = \mathbf{B}_b^{\top}\boldsymbol{\theta}_b,\;\;
+\hat{\mathbf{y}} = \mathbf{B}_f^{\top}\boldsymbol{\theta}_f}_{\text{frozen basis}},
+\end{equation}
+where the projections $\mathbf{W}_b$ and $\mathbf{W}_f$ are learned without
+constraint and the basis matrices $\mathbf{B}_b \in \mathbb{R}^{d_b \times L}$
+and $\mathbf{B}_f \in \mathbb{R}^{d_f \times H}$ are frozen at build time with
+orthonormal rows. Blocks are grouped into $S$ stacks (default 10); writing
+$(\hat{\mathbf{x}}_\ell, \hat{\mathbf{y}}_\ell)$ for the outputs of block
+$\ell$, the stream updates as $\mathbf{x}_{\ell+1} = \mathbf{x}_\ell -
+\hat{\mathbf{x}}_\ell$ while the model forecast accumulates the
+$\hat{\mathbf{y}}_\ell$. Under \eqref{eq:formulation} the entire method
+reduces to \emph{two integers and one trunk choice}: the ranks $d_b$ and
+$d_f$, and whether the trunk has uniform hidden width $U$ or an autoencoder
+bottleneck of latent width $d$. Every variant studied in this paper is a
+choice of how the rows of $\mathbf{B}$ are generated, or of how $\mathbf{h}$
+is produced. Table~\ref{tab:dimensions} defines every symbol used in this
+paper; no other table or equation introduces one.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Dimension table. Every mathematical symbol in the paper appears here
+exactly once; nothing outside this table may introduce a symbol. Ranks follow
+the shorthand of the results tables: $d_b$ and $d_f$ are written $H$ when
+equal to the horizon, $2H$ when twice it, $L$ when matched to the input
+window, and as an integer otherwise.}
+\label{tab:dimensions}
+\begin{tabular}{lll}
+\toprule
+Symbol & Space / value & Meaning \\
+\midrule
+$L$ & $\mathbb{N}$ & backcast (input window) length \\
+$H$ & $\mathbb{N}$ & forecast (horizon) length \\
+$S$ & $\mathbb{N}$ & number of stacks (default 10) \\
+$U$ & $\mathbb{N}$ & uniform-trunk hidden width (default 512) \\
+$d$ & $\mathbb{N}$ & AE-trunk latent width \\
+$d_b$ & $\mathbb{N}$, ${\le}\,L$ & backcast basis rank (default $H$ or $2H$) \\
+$d_f$ & $\mathbb{N}$, ${\le}\,H$ & forecast basis rank (complete when $d_f = H$) \\
+$p$ & $\mathbb{N}$ & polynomial rank of the trend branch (default 3) \\
+$r$ & $\mathbb{N}$ & learned generic-branch rank \\
+$\mathbf{x}$ & $\mathbb{R}^L$ & block input (residual stream) \\
+$\mathbf{h}$ & $\mathbb{R}^U$ or $\mathbb{R}^d$ & trunk output \\
+$\boldsymbol{\theta}_b,\ \boldsymbol{\theta}_f$
+  & $\mathbb{R}^{d_b},\ \mathbb{R}^{d_f}$ & coefficient vectors \\
+$\mathbf{W}_b,\ \mathbf{W}_f$
+  & $\mathbb{R}^{d_b\times U},\ \mathbb{R}^{d_f\times U}$ & learned projections \\
+$\mathbf{B}_b,\ \mathbf{B}_f$
+  & $\mathbb{R}^{d_b\times L},\ \mathbb{R}^{d_f\times H}$
+  & frozen orthonormal basis matrices \\
+$\mathbf{P}_b,\ \mathbf{P}_f$
+  & $\mathbb{R}^{p\times L},\ \mathbb{R}^{p\times H}$
+  & frozen polynomial (trend) basis matrices \\
+$\mathbf{G}_f$ & $\mathbb{R}^{r\times H}$ & learned generic-branch basis \\
+$\mathbf{v}$ & $\mathbb{R}^d$ & AE latent gate vector (appendix only) \\
+$\phi$ & --- & trunk activation (ReLU unless stated) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Synthesis heads: unconstrained linear versus frozen basis}
+\label{sec:method_heads}
+
+The unconstrained linear synthesis head of standard N-BEATS is a limiting
+case of \eqref{eq:formulation}, not a different architecture. Suppose
+$d_f = H$. Then $\mathbf{B}_f$ is square and orthogonal, and for any
+unconstrained head $\mathbf{M} \in \mathbb{R}^{H \times U}$ there is a
+projection $\mathbf{W}_f = \mathbf{B}_f\,\mathbf{M}$ with
+$\mathbf{B}_f^{\top}\mathbf{W}_f =
+\mathbf{B}_f^{\top}\mathbf{B}_f\,\mathbf{M} = \mathbf{M}$ exactly (verified
+numerically at residual $5.6\times10^{-15}$). At complete forecast rank with
+linear synthesis, the learned projection absorbs the basis rotation: a block
+with a frozen forecast basis represents precisely what standard N-BEATS
+represents, in rotated coordinates, and the identity of the basis is inert.
+
+Four scope conditions keep that claim honest, and every downstream use of the
+result respects them:
+
+\begin{enumerate}
+\item \textbf{Expressiveness, not trainability.} The guarantee fixes what the
+forecast head can represent, not what training finds; a complete basis can
+still fail to train, which is the separate axis of
+Section~\ref{sec:method_predictors}.
+\item \textbf{Trend-branch-present null.} Every arm of the identity comparison
+grid carried the paired polynomial trend branch, which absorbs the dominant
+component that otherwise breaks coefficient conditioning; the null is a
+trend-branch-present result.
+\item \textbf{Forecast head only.} Every shipped backcast basis is truncated
+($d_b = H$ or $2H$ rows against $L = 3$--$5H$), and truncated bases from
+different generators span different subspaces that no rotation relates.
+\item \textbf{Tiered configurations excluded.} Tiered offset schedules
+truncate the forecast basis itself and therefore belong to the truncated
+regime below, where measurement, not proof, carries the equivalence.
+\end{enumerate}
+
+Below complete rank the rotation lapses and truncation becomes the central
+design choice. Setting $d_f < H$ confines every block's forecast to the span
+of the retained rows of $\mathbf{B}_f$: the frozen basis makes rank an
+explicit knob. An unconstrained head pins rank at $H$ implicitly and cannot
+expose the trade-off; the frozen head turns it into one of the two integers
+of the method. What to retain at a given rank is decided by the two quantities
+of Section~\ref{sec:method_predictors}, computed before any training run.
+
+\subsection{Basis construction}
+\label{sec:method_basis}
+
+All generators produce $\mathbf{B}_b$ and $\mathbf{B}_f$ at initialization
+and register them as non-trainable buffers; neither training nor inference
+ever evaluates a transform, only the matrix products of
+\eqref{eq:formulation}. Three constructions are used.
+
+\paragraph{Wavelet frames.} The discrete-wavelet generator applies inverse
+reconstruction to unit impulses placed one at a time in each wavelet
+coefficient band, yielding a raw synthesis frame over the target length; the
+frame is then orthogonalized by singular-value decomposition and its
+orthonormal rows form the basis. Row ordering matters under truncation: from
+the same frame, the dyadic (band-ordered) arrangement and the
+energy-descending arrangement induced by the orthogonalization span different
+subspaces of equal rank. An earlier claim of ours that a wavelet basis finishes
+behind random draws was an artifact of exactly this step --- our own
+orthogonalization destroyed the dyadic ordering --- and is withdrawn.
+
+\paragraph{Cosine and data-dependent bases.} The discrete cosine basis (DCT)
+contributes fixed cosine rows, is defined at every horizon, and cannot
+silently degenerate. The Karhunen--Lo\`eve basis (KL) diagonalizes the
+uncentered second-moment matrix of forecast windows sampled from the training
+set and orders rows by descending eigenvalue; among fixed orthonormal bases
+it maximizes captured energy at every rank, which makes it the theoretically
+optimal truncation for linear approximation.
+
+\paragraph{Degenerate short-horizon behavior.} Below the minimum length its
+filter requires, a wavelet generator returns a valid orthonormal basis whose
+every row has support 1 --- the identity matrix. Several historical runs
+labelled as wavelet configurations silently received this identity on short
+horizons. The resulting disclosures are governed by
+Section~\ref{sec:method_identity}; the revised code raises an error instead
+of degenerating, and the corrected practitioner default is the DCT.
+Stack-level offset schedules select consecutive row blocks for successive
+stacks; the constant and tiered schedules appear as the optional
+\emph{Offsets} column of the results tables, and the tiered schedule belongs
+to the truncated regime by scope condition~4.
+
+\subsection{Two pre-training predictors}
+\label{sec:method_predictors}
+
+Let $\mathbf{y}^{(1)},\dots,\mathbf{y}^{(N)}$ be a sample of training
+forecast windows and let $\Pi_{\mathcal{S}}$ be the orthogonal projector onto
+the span $\mathcal{S}$ of the retained rows of a basis. The
+\textbf{captured energy} of that truncation is
+\begin{equation}
+\label{eq:capture}
+\operatorname{CE}(\mathcal{S})
+=\frac{\sum_{i=1}^{N}\bigl\lVert\Pi_{\mathcal{S}}\,\mathbf{y}^{(i)}\bigr\rVert^{2}}
+      {\sum_{i=1}^{N}\lVert\mathbf{y}^{(i)}\rVert^{2}},
+\end{equation}
+the fraction of target energy lying inside the retained subspace. Writing
+$\mathbf{b}_k$ for row $k$ of a complete orthonormal basis and $e_k$ for its
+share of coefficient energy,
+$e_k=\sum_{i}\langle\mathbf{b}_k,\mathbf{y}^{(i)}\rangle^{2}\,
+/\sum_{i}\lVert\mathbf{y}^{(i)}\rVert^{2}$, the \textbf{effective rank} is
+the participation ratio of the coefficient spectrum,
+\begin{equation}
+\label{eq:effrank}
+\rho_{\mathrm{eff}}=\Bigl(\textstyle\sum_{k}e_k^{2}\Bigr)^{-1},
+\end{equation}
+which counts roughly how many coefficients carry the signal. Both quantities
+are computable from training windows alone, before any gradient step, and
+they answer the two questions that truncation raises: captured energy
+predicts the trained accuracy of a truncated basis, and effective rank
+predicts whether a plain linear synthesis head trains at all --- a head asked
+to fill one dominant coordinate beside many small ones may fail regardless of
+how much energy the basis captures. The evidence for both claims appears in
+the theory and ablation sections.
+
+\subsection{Composition and the canonical variants}
+\label{sec:method_variants}
+
+Optional branches extend \eqref{eq:formulation} by adding rows to the same
+heads, never by changing its structure. The trend branch appends $p$ frozen
+polynomial rows ($\mathbf{P}_b$, $\mathbf{P}_f$) to the respective basis
+matrices; on a unified two-branch block the forecast path is
+\begin{equation}
+\label{eq:composition}
+\hat{\mathbf{y}}
+=\begin{bmatrix}\mathbf{B}_f\\ \mathbf{P}_f\end{bmatrix}^{\!\top}
+ \boldsymbol{\theta}_f ,
+\end{equation}
+and the generic branch further appends $r$ learned rows
+($\mathbf{G}_f$, forecast path only), giving a three-way additive
+decomposition in which two structured bases stay frozen and only the
+coefficients and the generic rows train. Unused branch rows are simply
+absent. A two-branch block occupies each stack position (the unified layout),
+or single-branch stacks alternate down the model (the alternating layout);
+the layouts differ measurably and appear as the optional \emph{Layout} column
+of the results tables.
+
+The trunk is either a uniform-width network of four affine layers with
+activation $\phi$, or an hourglass autoencoder that routes every input
+through a bottleneck of width $d$
+($U \rightarrow U/2 \rightarrow d \rightarrow U/2 \rightarrow U$), restoring
+the working width at its output so that both trunks feed
+\eqref{eq:formulation} identically. A gated variant multiplies the latent
+coordinates elementwise by $\operatorname{sigm}(\mathbf{v})$; the gate is
+measured to have no effect on accuracy (twelve paired comparisons, smallest
+$p = 0.24$), so all accuracy tables report the ungated bottleneck and the
+gate survives only in an appendix evidence table and the configuration
+appendix. A variational latent head was implemented and is dropped from every
+leaderboard: it is catastrophically worse on M4 ($5$--$10\times$), and one
+appendix row records the finding.
+
+Table~\ref{tab:variant_taxonomy} is the canonical variant list. Variant names
+carry branch composition only; depth $S$, the ranks, the trunk, and the
+layout are columns of the results tables, never parts of a name. The two
+Oreshkin baselines keep their published names and their unconstrained heads:
+they are the complete-rank limiting case of
+Section~\ref{sec:method_heads}.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Canonical variant taxonomy. Names encode branch composition only;
+every other configuration axis ($S$, $d_b$, $d_f$, trunk, layout, offsets) is
+a column of the results tables. The last column lists the historical encoded
+names each variant subsumes; these strings appear nowhere else in the paper.}
+\label{tab:variant_taxonomy}
+\begin{tabular}{@{}lp{5.2cm}l@{}}
+\toprule
+Variant & Definition & Subsumes (historical names) \\
+\midrule
+N-BEATS-G & Oreshkin baseline, generic blocks &
+  \texttt{NBEATS-G*} \\
+N-BEATS-I+G & Oreshkin baseline, interpretable + generic &
+  \texttt{NBEATS-IG*} \\
+FB & frozen orthonormal basis replaces each synthesis head &
+  \texttt{WaveletV3} blocks, \texttt{$\langle$fam$\rangle$WaveletV3*},
+  all family-suffixed forms \\
+FB+T & FB with a paired polynomial trend branch (rank $p$) &
+  \texttt{TW*} (unified); \texttt{T+$\langle$fam$\rangle$V3}
+  (alternating); \texttt{TWAE}, \texttt{TWAELG}, \texttt{TAE+...AE},
+  \texttt{TALG}/\texttt{TAELG+...} \\
+FB+T+G & FB+T plus a learned rank-$r$ generic branch &
+  \texttt{TWG}, \texttt{TWGAE}, \texttt{TWGAELG} \\
+NHiTS-FB & FB blocks under the NHiTS backbone &
+  NHiTS sweep rows (transfer section only) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Notation notes}
+\label{sec:method_notation}
+
+Table~\ref{tab:notation_disambiguation} resolves every symbol collision of
+the submitted version; no retired symbol survives with two meanings. The
+submission's configuration strings packed family, stack count, latent width,
+basis dimension, and activation flags into one token; that grammar is fully
+replaced by the structured columns of the results tables, and the mapping
+from every historical string is recorded in the configuration appendix.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Symbol disambiguation relative to the submitted version.}
+\label{tab:notation_disambiguation}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Old symbol & Collisions in the submission & Resolution here \\
+\midrule
+$\sigma$ & trunk activation; gate sigmoid; std in score tables &
+  trunk activation $\phi$; gate written $\operatorname{sigm}(\cdot)$;
+  dispersion shown only as ``$\pm$'' \\
+$\gamma$ & gate vector; learning-rate decay factor &
+  gate vector $\mathbf{v}$; decay written literally ``$\times0.5$'' \\
+$k$ & summation index; basis rank; wavelet translation index &
+  ranks $d_b$, $d_f$; $k$ reserved for summation indices \\
+$\boldsymbol{\Psi}_b,\ \boldsymbol{\Psi}_f$
+  & same object as the basis matrices, introduced separately &
+  $\mathbf{B}_b$, $\mathbf{B}_f$ everywhere \\
+$T$ & trend basis matrix; also a series length &
+  trend bases $\mathbf{P}_b$, $\mathbf{P}_f$; lengths are $L$ and $H$ only \\
+\texttt{trend\_thetas\_dim}, \texttt{ttd}, \texttt{td}
+  & three spellings of one quantity &
+  $p$; the API name appears once, in the hyperparameter appendix \\
+\texttt{latent\_dim}, \texttt{ld}
+  & two spellings &
+  $d$; the API name appears once, in the hyperparameter appendix \\
+\texttt{basis\_dim}, \texttt{bd}, \texttt{bdeq}, \texttt{bd2eq}
+  & four spellings &
+  $d_b$ (and $d_f$ where the two paths differ) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Identity-basis disclosure and marking}
+\label{sec:method_identity}
+
+Because a wavelet generator returns the identity below its minimum filter
+length (Section~\ref{sec:method_basis}), some historical runs labelled as
+wavelet configurations in fact used the identity matrix on their forecast
+path. Four marking rules govern how later tables disclose this, uniformly and
+without exception:
+
+\begin{enumerate}
+\item Every results-table cell whose (historical family, horizon) combination
+received the identity basis carries the marker $\ddagger$ --- including the
+main leaderboard, where the affected headline cells are disclosed in the
+caption itself. The marker scopes exactly to the degenerate combinations: the
+Coiflet and Symlet families on the Yearly, Quarterly, Weekly, Daily, and
+Monthly horizons, the Daubechies-3 family on Yearly and Quarterly only, and
+no Hourly cell, where every historical family was genuine.
+\item The family-equivalence analysis is restated over genuinely distinct
+bases per period (on Hourly all five were genuine), and the identity is
+presented as the limiting case of the completeness result of
+Section~\ref{sec:method_heads}, which it corroborates.
+\item No sentence attributes an effect to a named basis family on an
+identity-marked cell; such statements are rewritten as statements about the
+variant at the stated rank, with $\ddagger$ carrying the disclosure.
+\item The identity matrix itself ships as an appendix table,
+cross-referenced from every marked cell, together with the corrected
+practitioner rule that the DCT is the default basis because it is defined at
+every horizon and cannot silently degenerate.
+\end{enumerate}
+
+Two further markers used in later tables --- an output-activation flag and a
+note on historically gated trunks --- are defined once, together with the
+column schema and the parameter-count convention, in the unified legend that
+introduces the results section.

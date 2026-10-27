@@ -240,6 +240,92 @@ class TestOptimizerDispatch:
             model.configure_optimizers()
 
 
+class TestWeightDecay:
+    """Verify weight_decay is stored and forwarded to the optimizer."""
+
+    def test_weight_decay_forwarded_to_optimizer(self):
+        model = _make_model(["Generic"], weight_decay=0.01)
+        opt = model.configure_optimizers()
+        assert model.weight_decay == 0.01
+        assert all(pg["weight_decay"] == 0.01 for pg in opt.param_groups)
+
+    def test_weight_decay_default_none_keeps_adam_zero(self):
+        model = _make_model(["Generic"])
+        opt = model.configure_optimizers()
+        assert model.weight_decay is None
+        assert all(pg["weight_decay"] == 0.0 for pg in opt.param_groups)
+
+    def test_weight_decay_default_none_preserves_adamw_default(self):
+        # Old code never passed the kwarg, so AdamW used its own 0.01 default.
+        # weight_decay=None must keep that behavior byte-identical.
+        model = _make_model(["Generic"], optimizer_name="AdamW")
+        opt = model.configure_optimizers()
+        assert all(pg["weight_decay"] == 0.01 for pg in opt.param_groups)
+
+    def test_weight_decay_explicit_zero_overrides_adamw_default(self):
+        model = _make_model(["Generic"], optimizer_name="AdamW", weight_decay=0.0)
+        opt = model.configure_optimizers()
+        assert all(pg["weight_decay"] == 0.0 for pg in opt.param_groups)
+
+    def test_weight_decay_with_sgd(self):
+        model = _make_model(["Generic"], optimizer_name="SGD", weight_decay=1e-4)
+        opt = model.configure_optimizers()
+        assert all(pg["weight_decay"] == 1e-4 for pg in opt.param_groups)
+
+    def test_weight_decay_nhits(self):
+        model = _make_nhits(["Generic"], weight_decay=0.01)
+        opt = model.configure_optimizers()
+        assert model.weight_decay == 0.01
+        assert all(pg["weight_decay"] == 0.01 for pg in opt.param_groups)
+
+    def test_weight_decay_nhits_default_none_keeps_adam_zero(self):
+        model = _make_nhits(["Generic"])
+        opt = model.configure_optimizers()
+        assert model.weight_decay is None
+        assert all(pg["weight_decay"] == 0.0 for pg in opt.param_groups)
+
+
+class TestAEIntermediateWidthPlumbing:
+    """Verify ae_intermediate_width flows from the model into AE-backed blocks."""
+
+    def test_create_stack_forwards_taper_width(self):
+        model = _make_model(["GenericAE"], g_width=64, ae_intermediate_width=48)
+        block = model.stacks[0][0]
+        assert block.fc1.out_features == 48
+        assert block.fc4.in_features == 48
+
+    def test_default_taper_is_units_half(self):
+        model = _make_model(["GenericAE"], g_width=64)
+        block = model.stacks[0][0]
+        assert model.ae_intermediate_width is None
+        assert block.fc1.out_features == 32
+
+    def test_wavelet_v3ae_taper(self):
+        model = _make_model(["WaveletV3AE"], g_width=64, ae_intermediate_width=48)
+        assert model.stacks[0][0].fc1.out_features == 48
+
+    def test_trendwavelet_ae_taper(self):
+        model = _make_model(["TrendWaveletAE"], t_width=64, ae_intermediate_width=48)
+        assert model.stacks[0][0].fc1.out_features == 48
+
+    def test_non_ae_blocks_unaffected(self):
+        model = _make_model(
+            ["Generic", "Trend", "Seasonality"],
+            g_width=64,
+            t_width=32,
+            s_width=64,
+            ae_intermediate_width=48,
+        )
+        x = torch.randn(4, 20)
+        backcast, forecast = model(x)
+        assert backcast.shape == (4, 20)
+        assert forecast.shape == (4, 5)
+
+    def test_nhits_forwards_taper_width(self):
+        model = _make_nhits(["GenericAE"], g_width=64, ae_intermediate_width=48)
+        assert model.stacks[0][0].fc1.out_features == 48
+
+
 class TestPlateauSchedulerConfig:
     """Verify configure_optimizers wires interval/frequency for plateau."""
 
@@ -333,14 +419,14 @@ class TestModelDefaults:
         assert model.latent_gate_fn == "sigmoid"
         assert model.stacks[0][0].latent_gate_fn == "sigmoid"
 
-    def test_kl_weight_defaults_to_point_one(self):
+    def test_kl_weight_defaults_to_point_001(self):
         model = NBeatsNet(
             backcast_length=20,
             forecast_length=5,
             stack_types=["VAE"],
             n_blocks_per_stack=1,
         )
-        assert model.kl_weight == 0.1
+        assert model.kl_weight == 0.001
 
 
 # --- sum_losses semantic fix tests ---
@@ -934,9 +1020,9 @@ class TestNHiTSNetConstruction:
         assert model.n_pools_kernel_size == [2, 2]
         assert model.n_freq_downsample == [1, 1]
 
-    def test_kl_weight_defaults_to_point_one(self):
+    def test_kl_weight_defaults_to_point_001(self):
         model = _make_nhits(["VAE"], n_pools_kernel_size=[1], n_freq_downsample=[1])
-        assert model.kl_weight == 0.1
+        assert model.kl_weight == 0.001
 
     def test_custom_pools_stored(self):
         model = _make_nhits(
@@ -1416,9 +1502,9 @@ class TestSkipConnections:
         model = _make_model(["Generic"] * 5, g_width=32)
         assert model.skip_distance == 0
 
-    def test_skip_alpha_default_is_zero(self):
+    def test_skip_alpha_default(self):
         model = _make_model(["Generic"] * 5, g_width=32)
-        assert model.skip_alpha == 0.0
+        assert model.skip_alpha == 0.1
         assert model._skip_alpha_learnable is False
 
     def test_skip_distance_stored(self):

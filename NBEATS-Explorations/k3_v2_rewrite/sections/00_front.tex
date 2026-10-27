@@ -1,0 +1,82 @@
+\title{Frozen Basis Time Series Forecasting}
+
+\author{%
+  Daniel Byrne\\
+  \texttt{realdanielbyrne@icloud.com}
+}
+
+\maketitle
+
+\begin{abstract}
+N-BEATS reaches its M4 accuracy with twenty to forty five million parameters, a capacity never
+questioned. Which parts of a basis expansion block carry the accuracy, and which are inert? I
+factor each block's unconstrained synthesis head through a frozen orthonormal basis, leaving two
+integers, the backcast and forecast ranks, plus one trunk choice, varying each at matched
+budgets.
+
+The parameters are in the trunk and are not needed: narrowing it from 2048 units to 128 cuts the
+count 48.8 fold, 64,645,150 to 1,323,550, for 0.098 sMAPE at p = 0.78. The compression credited
+to the wavelet basis is the trunk, one integer in the original architecture. Basis identity
+cannot matter at the rank every reported configuration uses, where the basis is square and
+orthogonal and the projection feeding it absorbs any rotation exactly; thirty six paired
+comparisons over wavelet, cosine and random bases are null, minimum p = 0.084. Below full rank
+it matters greatly, and captured energy, the share of target energy the retained rows span,
+reproduces the trained ordering without inversion on two datasets, rank correlation -1.0 on
+Traffic-96. Trainability is a separate axis: effective rank tracks convergence at rho = +0.949,
+bases concentrating their energy in one direction fail on every seed, and rectifying the output
+or pairing a trend branch restores full convergence without adding expressive power. Instability
+is negative forecasts on positive series, which sMAPE scores at its 200 ceiling regardless of
+magnitude; deleting those points recovers the converged score to within 0.11, and rectification
+cuts collapses from 107 of 23,786 runs to 0 of 136. Out of sample on Tourism the compact
+configuration matches or beats both paper baselines at 14 to 15 times fewer parameters, and
+never collapses in 240 runs.
+
+The gain is position on the accuracy against size frontier, not accuracy: two significant losses
+on M4 and an outright loss on Traffic-96, 29.37 sMAPE at 1.81M against 26.24 at 52.3M.
+\end{abstract}
+
+\section{Introduction}\label{sec:intro}
+
+The submission this rewrite replaces claimed that wavelets and autoencoders deliver accuracy and
+compression on top of the N-BEATS architecture \citep{oreshkin2020nbeats}; neither half survived
+the controls run after submission. The corrected thesis is narrower and, we argue, more useful.
+N-BEATS carries roughly fifty times more trunk capacity than its single-model accuracy requires,
+where the \emph{trunk} is the stack of fully connected layers inside each block that maps the
+input window to a hidden vector. Replacing each block's unconstrained linear synthesis head with
+a frozen orthonormal \emph{basis} --- a fixed set of orthonormal vectors into which the head's
+output is expanded --- makes the rank an explicit knob and removes the head's ability to emit
+values outside the target's range. Which basis fills that slot is provably irrelevant once it is
+complete. Two quantities computable before training, captured energy and effective rank, say how
+accurate a truncated basis will be and whether it will train at all.
+
+Four results carry the paper. First, the trunk result (Section~\ref{sec:trunk}): trunk width is
+inert across a 48.8-fold parameter range --- 160 runs, rung means spanning 0.098~\smape{}
+against within-rung seed standard deviations of 0.15--0.25, Kruskal--Wallis $p = 0.776$ and
+$0.773$ --- so the compression the submission credited to the basis was one integer in a
+constructor. Second, the completeness result (Section~\ref{sec:completeness}): at complete
+forecast rank with linear synthesis, basis identity is provably inert --- the learned projection
+absorbs any rotation exactly, at residual $5.6 \times 10^{-15}$, and none of 36 paired
+comparisons is significant, minimum $p = 0.084$ --- subject to the four scope conditions stated
+in Section~\ref{sec:method}. Third, the truncated-rank result (Section~\ref{sec:truncation}):
+captured energy, the share of target energy the retained basis rows span, predicts the trained
+ordering exactly (Traffic-96, five bases, Spearman $\rho = -1.0$, exact $p = 0.017$; run-level
+$\rho = -0.98$, $p = 9.0 \times 10^{-18}$). Fourth, the trainability result
+(Section~\ref{sec:trainability}): at complete rank the DCT and Karhunen--Lo\`eve bases fail on
+every seed under a plain linear head, with effective rank $1.05$ and $1.54$ against $17.9$ for
+bases that never fail, and a paired trend branch repairs both to 10/10 converged seeds
+($p = 0.00018$).
+
+Three things this paper does not claim. It does not claim that wavelets beat Fourier: at matched
+width that comparison is null. It does not claim wavelet-family effects across datasets: that
+claim is retracted, Fisher combined $p = 0.125$. It does not claim anything about Transformers:
+the submission's Transformer section is withdrawn (Section~\ref{sec:scoped}). What remains is a
+measurement about N-BEATS, together with the design recipe that follows from it.
+
+Section~\ref{sec:method} states the method in two integers and one trunk choice;
+Sections~\ref{sec:trunk}--\ref{sec:trainability} develop the four load-bearing results;
+Section~\ref{sec:tourism} validates the compact configuration out of sample;
+Section~\ref{sec:scoped} collects the scoped, transferred, and withdrawn claims;
+Section~\ref{sec:related_recipe_limits} positions the work against prior art, gives the
+practitioner's recipe, and states the limitations. Appendices carry the protocols, the full
+per-period tables, the configuration lists, the out-of-distribution detail, and the reproduction
+material; all configurations, per-run CSVs, and registered prediction files ship with the paper.

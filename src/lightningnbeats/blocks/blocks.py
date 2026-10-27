@@ -653,7 +653,14 @@ class Trend(RootBlock):
 # AutoEncoderRoot Blocks
 # ---------------------------------------------------------------------------
 class AERootBlock(nn.Module):
-    def __init__(self, backcast_length, units, activation="ReLU", latent_dim=5):
+    def __init__(
+        self,
+        backcast_length,
+        units,
+        activation="ReLU",
+        latent_dim=5,
+        ae_intermediate_width=None,
+    ):
         """The AERootBlock class is the basic building block of the N-BEATS network.
         It consists of a stack of fully connected layers organized as an Autoencoder.
         It serves as the base class for the GenericAEBlock, SeasonalityAEBlock,
@@ -671,6 +678,11 @@ class AERootBlock(nn.Module):
               layers. Defaults to 'ReLU'.
             latent_dim (int, optional):
               The dimensionality of the latent space. Defaults to 5.
+            ae_intermediate_width (int, optional):
+              Width of the intermediate (taper) encoder/decoder layers
+              (encoder backcast_length -> ae_intermediate_width -> latent_dim,
+              decoder mirrored). Defaults to None, meaning units // 2 (the
+              historical shape).
 
         Raises:
               ValueError: If the activation function is not in ACTIVATIONS.
@@ -679,16 +691,20 @@ class AERootBlock(nn.Module):
         self.units = units
         self.backcast_length = backcast_length
         self.latent_dim = latent_dim
+        self.ae_intermediate_width = ae_intermediate_width
 
         if not activation in ACTIVATIONS:
             raise ValueError(f"'{activation}' is not in {ACTIVATIONS}")
 
         self.activation = getattr(nn, activation)()
 
-        self.fc1 = nn.Linear(backcast_length, units // 2)
-        self.fc2 = nn.Linear(units // 2, latent_dim)
-        self.fc3 = nn.Linear(latent_dim, units // 2)
-        self.fc4 = nn.Linear(units // 2, units)
+        intermediate = (
+            ae_intermediate_width if ae_intermediate_width is not None else units // 2
+        )
+        self.fc1 = nn.Linear(backcast_length, intermediate)
+        self.fc2 = nn.Linear(intermediate, latent_dim)
+        self.fc3 = nn.Linear(latent_dim, intermediate)
+        self.fc4 = nn.Linear(intermediate, units)
 
     def forward(self, x):
         x = squeeze_last_dim(x)
@@ -707,6 +723,7 @@ class AERootBlockLG(nn.Module):
         activation="ReLU",
         latent_dim=5,
         latent_gate_fn="sigmoid",
+        ae_intermediate_width=None,
     ):
         """Learned-Gate AE backbone. Same encoder-decoder structure as AERootBlock
         but adds a learnable gate vector that applies sigmoid-scaled per-dimension
@@ -721,12 +738,16 @@ class AERootBlockLG(nn.Module):
             latent_gate_fn (str, optional): Latent gate function name. One of
                 ``'sigmoid'``, ``'wavy_sigmoid'``, or ``'wavelet_sigmoid'``.
                 Defaults to ``'sigmoid'``.
+            ae_intermediate_width (int, optional): Width of the intermediate
+                (taper) encoder/decoder layers. Defaults to None, meaning
+                units // 2 (the historical shape).
         """
         super(AERootBlockLG, self).__init__()
         self.units = units
         self.backcast_length = backcast_length
         self.latent_dim = latent_dim
         self.latent_gate_fn = latent_gate_fn
+        self.ae_intermediate_width = ae_intermediate_width
 
         if activation not in ACTIVATIONS:
             raise ValueError(f"'{activation}' is not in {ACTIVATIONS}")
@@ -737,10 +758,13 @@ class AERootBlockLG(nn.Module):
 
         self.activation = getattr(nn, activation)()
 
-        self.fc1 = nn.Linear(backcast_length, units // 2)
-        self.fc2 = nn.Linear(units // 2, latent_dim)
-        self.fc3 = nn.Linear(latent_dim, units // 2)
-        self.fc4 = nn.Linear(units // 2, units)
+        intermediate = (
+            ae_intermediate_width if ae_intermediate_width is not None else units // 2
+        )
+        self.fc1 = nn.Linear(backcast_length, intermediate)
+        self.fc2 = nn.Linear(intermediate, latent_dim)
+        self.fc3 = nn.Linear(latent_dim, intermediate)
+        self.fc4 = nn.Linear(intermediate, units)
 
         # Learned gate: sigmoid(latent_gate) scales each latent dimension
         self.latent_gate = nn.Parameter(torch.ones(latent_dim))
@@ -763,7 +787,14 @@ class AERootBlockLG(nn.Module):
 
 
 class AERootBlockVAE(_VAEMixin, nn.Module):
-    def __init__(self, backcast_length, units, activation="ReLU", latent_dim=5):
+    def __init__(
+        self,
+        backcast_length,
+        units,
+        activation="ReLU",
+        latent_dim=5,
+        ae_intermediate_width=None,
+    ):
         """Variational AE backbone. Replaces the deterministic bottleneck with a
         stochastic latent space using the reparameterization trick. Produces mu and
         log_var heads, samples z = mu + sigma * epsilon during training, and stores
@@ -774,24 +805,33 @@ class AERootBlockVAE(_VAEMixin, nn.Module):
             units (int): Width of the fully connected layers.
             activation (str, optional): Activation function name. Defaults to 'ReLU'.
             latent_dim (int, optional): Latent space dimensionality. Defaults to 5.
+            ae_intermediate_width (int, optional): Width of the outer intermediate
+                (taper) encoder/decoder layers; the inner layers use half of it.
+                Defaults to None, meaning units // 2 (the historical shape,
+                whose inner layers are units // 4).
         """
         super(AERootBlockVAE, self).__init__()
         self.units = units
         self.backcast_length = backcast_length
         self.latent_dim = latent_dim
+        self.ae_intermediate_width = ae_intermediate_width
 
         if activation not in ACTIVATIONS:
             raise ValueError(f"'{activation}' is not in {ACTIVATIONS}")
 
         self.activation = getattr(nn, activation)()
 
-        self.fc1 = nn.Linear(backcast_length, units // 2)
-        self.fc1b = nn.Linear(units // 2, units // 4)
-        self.fc2_mu = nn.Linear(units // 4, latent_dim)
-        self.fc2_logvar = nn.Linear(units // 4, latent_dim)
-        self.fc3 = nn.Linear(latent_dim, units // 4)
-        self.fc3b = nn.Linear(units // 4, units // 2)
-        self.fc4 = nn.Linear(units // 2, units)
+        intermediate = (
+            ae_intermediate_width if ae_intermediate_width is not None else units // 2
+        )
+        inner = intermediate // 2
+        self.fc1 = nn.Linear(backcast_length, intermediate)
+        self.fc1b = nn.Linear(intermediate, inner)
+        self.fc2_mu = nn.Linear(inner, latent_dim)
+        self.fc2_logvar = nn.Linear(inner, latent_dim)
+        self.fc3 = nn.Linear(latent_dim, inner)
+        self.fc3b = nn.Linear(inner, intermediate)
+        self.fc4 = nn.Linear(intermediate, units)
 
         # KL divergence loss stored after each forward pass
         self.kl_loss = torch.tensor(0.0)
@@ -824,10 +864,11 @@ class GenericAEBackcastAE(AERootBlock):
         activation: str = "ReLU",
         active_g: bool = False,
         latent_dim: int = 5,
+        ae_intermediate_width=None,
     ):
 
         super(GenericAEBackcastAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
 
         self.units = units
@@ -876,6 +917,7 @@ class AutoEncoderAE(AERootBlock):
         activation: str = "ReLU",
         active_g: bool = False,
         latent_dim: int = 5,
+        ae_intermediate_width=None,
     ):
         """AutoEncoder block with an AE backbone.
 
@@ -891,7 +933,7 @@ class AutoEncoderAE(AERootBlock):
         """
 
         super(AutoEncoderAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
 
         self.units = units
@@ -945,6 +987,7 @@ class GenericAE(AERootBlock):
         activation: str = "ReLU",
         active_g: bool = False,
         latent_dim: int = 5,
+        ae_intermediate_width=None,
     ):
         """Paper-faithful Generic Block with AERootBlock (bottleneck pre-split) backbone.
 
@@ -962,7 +1005,7 @@ class GenericAE(AERootBlock):
             latent_dim (int, optional): Latent dimension for the AE backbone. Defaults to 5.
         """
         super(GenericAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
 
         self.backcast_length = backcast_length
@@ -998,6 +1041,7 @@ class BottleneckGenericAE(AERootBlock):
         activation: str = "ReLU",
         active_g: bool = False,
         latent_dim: int = 5,
+        ae_intermediate_width=None,
     ):
         """Bottleneck Generic Block with AERootBlock (bottleneck pre-split) backbone.
 
@@ -1015,7 +1059,7 @@ class BottleneckGenericAE(AERootBlock):
             latent_dim (int, optional): Latent dimension for the AE backbone. Defaults to 5.
         """
         super(BottleneckGenericAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
 
         if share_weights:
@@ -1056,6 +1100,7 @@ class TrendAE(AERootBlock):
         activation="ReLU",
         active_g: bool = False,
         latent_dim=5,
+        ae_intermediate_width=None,
     ):
         """The TrendAEBlock implements the function whose parameters are generated by the _TrendGenerator block.
         The TrendAEBlock is an AutoEncoder version of the TrendBlock where the presplit section of the network
@@ -1076,7 +1121,7 @@ class TrendAE(AERootBlock):
               The activation function passed to the parent class Block. Defaults to 'ReLU'.
         """
         super(TrendAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         if share_weights:
             self.backcast_linear = self.forecast_linear = nn.Linear(units, thetas_dim)
@@ -1378,6 +1423,7 @@ class TrendWaveletAE(AERootBlock):
         forecast_basis_dim=None,
         backcast_wavelet_type=None,
         forecast_wavelet_type=None,
+        ae_intermediate_width=None,
     ):
         """TrendWaveletAE merges polynomial (Vandermonde) and orthonormal DWT basis expansions
         into a single block with an AutoEncoder backbone (Option A — parallel basis, additive output).
@@ -1415,7 +1461,7 @@ class TrendWaveletAE(AERootBlock):
                 path only.  Defaults to None (uses ``wavelet_type``).
         """
         super(TrendWaveletAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         self.trend_dim = trend_dim
         self.active_g = active_g
@@ -1520,6 +1566,7 @@ class TrendWaveletAELG(AERootBlockLG):
         backcast_wavelet_type=None,
         forecast_wavelet_type=None,
         latent_gate_fn="sigmoid",
+        ae_intermediate_width=None,
     ):
         """TrendWaveletAELG extends TrendWaveletAE with the Learned-Gate AE backbone.
 
@@ -1565,6 +1612,7 @@ class TrendWaveletAELG(AERootBlockLG):
             activation,
             latent_dim=latent_dim,
             latent_gate_fn=latent_gate_fn,
+        ae_intermediate_width=ae_intermediate_width,
         )
         self.trend_dim = trend_dim
         self.active_g = active_g
@@ -1669,6 +1717,7 @@ class TrendWaveletGenericAE(AERootBlock):
         forecast_basis_dim=None,
         backcast_wavelet_type=None,
         forecast_wavelet_type=None,
+        ae_intermediate_width=None,
     ):
         """Three-way additive decomposition (trend + wavelet + generic) with AE backbone.
 
@@ -1698,7 +1747,7 @@ class TrendWaveletGenericAE(AERootBlock):
             forecast_wavelet_type (str, optional): Override wavelet family for forecast. Defaults to None.
         """
         super(TrendWaveletGenericAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         self.trend_dim = trend_dim
         self.generic_dim = generic_dim
@@ -1815,6 +1864,7 @@ class TrendWaveletGenericAELG(AERootBlockLG):
         backcast_wavelet_type=None,
         forecast_wavelet_type=None,
         latent_gate_fn="sigmoid",
+        ae_intermediate_width=None,
     ):
         """Three-way additive decomposition (trend + wavelet + generic) with Learned-Gate AE backbone.
 
@@ -1828,6 +1878,7 @@ class TrendWaveletGenericAELG(AERootBlockLG):
             activation,
             latent_dim=latent_dim,
             latent_gate_fn=latent_gate_fn,
+        ae_intermediate_width=ae_intermediate_width,
         )
         self.trend_dim = trend_dim
         self.generic_dim = generic_dim
@@ -1943,6 +1994,7 @@ class TrendWaveletGenericVAE(AERootBlockVAE):
         forecast_basis_dim=None,
         backcast_wavelet_type=None,
         forecast_wavelet_type=None,
+        ae_intermediate_width=None,
     ):
         """Three-way additive decomposition (trend + wavelet + generic) with VAE backbone.
 
@@ -1952,7 +2004,7 @@ class TrendWaveletGenericVAE(AERootBlockVAE):
         Args: same as TrendWaveletGenericAE.
         """
         super(TrendWaveletGenericVAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         self.trend_dim = trend_dim
         self.generic_dim = generic_dim
@@ -2061,6 +2113,7 @@ class SeasonalityAE(AERootBlock):
         activation="ReLU",
         active_g: bool = False,
         latent_dim=5,
+        ae_intermediate_width=None,
     ):
         """The SeasonalityAEBlock is the basic building block of the N-BEATS network.
         It consists of a stack of fully connected layers defined the parent class Block,
@@ -2082,7 +2135,7 @@ class SeasonalityAE(AERootBlock):
               The activation function passed to the parent class Block. Defaults to 'LeakyReLU'.
         """
         super(SeasonalityAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
 
         self.backcast_linear = nn.Linear(
@@ -2125,6 +2178,7 @@ class GenericAELG(AERootBlockLG):
         active_g=False,
         latent_dim=5,
         latent_gate_fn="sigmoid",
+        ae_intermediate_width=None,
     ):
         super(GenericAELG, self).__init__(
             backcast_length,
@@ -2132,6 +2186,7 @@ class GenericAELG(AERootBlockLG):
             activation,
             latent_dim=latent_dim,
             latent_gate_fn=latent_gate_fn,
+        ae_intermediate_width=ae_intermediate_width,
         )
         self.backcast_length = backcast_length
         self.forecast_length = forecast_length
@@ -2163,6 +2218,7 @@ class BottleneckGenericAELG(AERootBlockLG):
         active_g=False,
         latent_dim=5,
         latent_gate_fn="sigmoid",
+        ae_intermediate_width=None,
     ):
         super(BottleneckGenericAELG, self).__init__(
             backcast_length,
@@ -2170,6 +2226,7 @@ class BottleneckGenericAELG(AERootBlockLG):
             activation,
             latent_dim=latent_dim,
             latent_gate_fn=latent_gate_fn,
+        ae_intermediate_width=ae_intermediate_width,
         )
         if share_weights:
             self.backcast_linear = self.forecast_linear = nn.Linear(units, thetas_dim)
@@ -2206,6 +2263,7 @@ class TrendAELG(AERootBlockLG):
         active_g=False,
         latent_dim=5,
         latent_gate_fn="sigmoid",
+        ae_intermediate_width=None,
     ):
         super(TrendAELG, self).__init__(
             backcast_length,
@@ -2213,6 +2271,7 @@ class TrendAELG(AERootBlockLG):
             activation,
             latent_dim=latent_dim,
             latent_gate_fn=latent_gate_fn,
+        ae_intermediate_width=ae_intermediate_width,
         )
         if share_weights:
             self.backcast_linear = self.forecast_linear = nn.Linear(units, thetas_dim)
@@ -2243,6 +2302,7 @@ class SeasonalityAELG(AERootBlockLG):
         active_g=False,
         latent_dim=5,
         latent_gate_fn="sigmoid",
+        ae_intermediate_width=None,
     ):
         super(SeasonalityAELG, self).__init__(
             backcast_length,
@@ -2250,6 +2310,7 @@ class SeasonalityAELG(AERootBlockLG):
             activation,
             latent_dim=latent_dim,
             latent_gate_fn=latent_gate_fn,
+        ae_intermediate_width=ae_intermediate_width,
         )
         self.backcast_linear = nn.Linear(
             units, 2 * int(backcast_length / 2 - 1) + 1, bias=False
@@ -2281,6 +2342,7 @@ class AutoEncoderAELG(AERootBlockLG):
         active_g=False,
         latent_dim=5,
         latent_gate_fn="sigmoid",
+        ae_intermediate_width=None,
     ):
         super(AutoEncoderAELG, self).__init__(
             backcast_length,
@@ -2288,6 +2350,7 @@ class AutoEncoderAELG(AERootBlockLG):
             activation,
             latent_dim=latent_dim,
             latent_gate_fn=latent_gate_fn,
+        ae_intermediate_width=ae_intermediate_width,
         )
         self.units = units
         self.thetas_dim = thetas_dim
@@ -2335,6 +2398,7 @@ class GenericAEBackcastAELG(AERootBlockLG):
         active_g=False,
         latent_dim=5,
         latent_gate_fn="sigmoid",
+        ae_intermediate_width=None,
     ):
         super(GenericAEBackcastAELG, self).__init__(
             backcast_length,
@@ -2342,6 +2406,7 @@ class GenericAEBackcastAELG(AERootBlockLG):
             activation,
             latent_dim=latent_dim,
             latent_gate_fn=latent_gate_fn,
+        ae_intermediate_width=ae_intermediate_width,
         )
         self.units = units
         self.thetas_dim = thetas_dim
@@ -2388,9 +2453,10 @@ class GenericVAE(AERootBlockVAE):
         activation="ReLU",
         active_g=False,
         latent_dim=5,
+        ae_intermediate_width=None,
     ):
         super(GenericVAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         self.backcast_length = backcast_length
         self.forecast_length = forecast_length
@@ -2421,9 +2487,10 @@ class BottleneckGenericVAE(AERootBlockVAE):
         activation="ReLU",
         active_g=False,
         latent_dim=5,
+        ae_intermediate_width=None,
     ):
         super(BottleneckGenericVAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         if share_weights:
             self.backcast_linear = self.forecast_linear = nn.Linear(units, thetas_dim)
@@ -2459,9 +2526,10 @@ class TrendVAE(AERootBlockVAE):
         activation="ReLU",
         active_g=False,
         latent_dim=5,
+        ae_intermediate_width=None,
     ):
         super(TrendVAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         if share_weights:
             self.backcast_linear = self.forecast_linear = nn.Linear(units, thetas_dim)
@@ -2491,9 +2559,10 @@ class SeasonalityVAE(AERootBlockVAE):
         activation="ReLU",
         active_g=False,
         latent_dim=5,
+        ae_intermediate_width=None,
     ):
         super(SeasonalityVAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         self.backcast_linear = nn.Linear(
             units, 2 * int(backcast_length / 2 - 1) + 1, bias=False
@@ -2524,9 +2593,10 @@ class AutoEncoderVAE(AERootBlockVAE):
         activation="ReLU",
         active_g=False,
         latent_dim=5,
+        ae_intermediate_width=None,
     ):
         super(AutoEncoderVAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         self.units = units
         self.thetas_dim = thetas_dim
@@ -2573,9 +2643,10 @@ class GenericAEBackcastVAE(AERootBlockVAE):
         activation="ReLU",
         active_g=False,
         latent_dim=5,
+        ae_intermediate_width=None,
     ):
         super(GenericAEBackcastVAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         self.units = units
         self.thetas_dim = thetas_dim
@@ -3382,6 +3453,7 @@ class WaveletV3AE(AERootBlock):
         latent_dim=5,
         backcast_wavelet_type=None,
         forecast_wavelet_type=None,
+        ae_intermediate_width=None,
     ):
         """WaveletV3AE: orthonormal DWT basis block with AutoEncoder backbone (Option B).
 
@@ -3412,7 +3484,7 @@ class WaveletV3AE(AERootBlock):
                 path only.  Defaults to None (uses ``wavelet_type``).
         """
         super(WaveletV3AE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         self.wavelet_type = wavelet_type
         self.backcast_wavelet_type = backcast_wavelet_type
@@ -3945,6 +4017,7 @@ class WaveletV3AELG(AERootBlockLG):
         backcast_wavelet_type=None,
         forecast_wavelet_type=None,
         latent_gate_fn="sigmoid",
+        ae_intermediate_width=None,
     ):
         """WaveletV3AELG: orthonormal DWT basis block with Learned-Gate AE backbone.
 
@@ -3980,6 +4053,7 @@ class WaveletV3AELG(AERootBlockLG):
             activation,
             latent_dim=latent_dim,
             latent_gate_fn=latent_gate_fn,
+        ae_intermediate_width=ae_intermediate_width,
         )
         self.wavelet_type = wavelet_type
         self.backcast_wavelet_type = backcast_wavelet_type
@@ -4562,9 +4636,10 @@ class WaveletV3VAE(AERootBlockVAE):
         latent_dim=5,
         backcast_wavelet_type=None,
         forecast_wavelet_type=None,
+        ae_intermediate_width=None,
     ):
         super(WaveletV3VAE, self).__init__(
-            backcast_length, units, activation, latent_dim=latent_dim
+            backcast_length, units, activation, latent_dim=latent_dim, ae_intermediate_width=ae_intermediate_width
         )
         self.wavelet_type = wavelet_type
         self.backcast_wavelet_type = backcast_wavelet_type

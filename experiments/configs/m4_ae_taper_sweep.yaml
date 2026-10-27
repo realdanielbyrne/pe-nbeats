@@ -1,0 +1,143 @@
+# ============================================================
+# Does the AE taper width matter at a FIXED bottleneck? The U/2 sweep.
+#
+# COMMITMENT SOURCE. Reviewer K8yb, Q(iv) (NeurIPS 2026 rebuttal, Sub. 30981):
+# "I swept the bottleneck d but not the intermediate width... Sweeping it is a
+# code change that goes in the revision, reported however it falls." The AE
+# backbone has always hardcoded its intermediate (taper) layers at units/2
+# (encoder L -> U/2 -> d, decoder d -> U/2 -> U); every AE result in the paper
+# inherits that shape untested. This config runs the missing sweep with the
+# new ae_intermediate_width parameter.
+#
+# DESIGN. One AE-backed architecture with the bottleneck FIXED (latent_dim=32)
+# and ONLY the taper swept. Alternating Trend + WaveletV3AE (haar), 10 stacks,
+# g_width=512, taper in {128, 256, 384, 512} = {U/4, U/2, 3U/4, U}:
+#
+#   taper=128   U/4    narrower than the historical default
+#   taper=256   U/2    <- reproduces the current hardcoded default exactly
+#   taper=384   3U/4
+#   taper=512   U      no taper at all (flat trunk into the bottleneck)
+#
+# The 256 cell is the control: it is bit-identical in architecture to every
+# previously reported WaveletV3AE config at these settings, so any deviation
+# of the other three cells is attributable to the taper alone.
+#
+# REGISTERED PREDICTION, BEFORE THE RUNS. The taper is null at matched
+# bottleneck: all four cells statistically indistinguishable, consistent with
+# the AE-bottleneck accuracy null (no accuracy at matched budget) and the gate
+# null already in hand. The taper is a parameter-count knob, not an accuracy
+# knob. REPORTED HOWEVER IT FALLS -- if any cell separates, that goes in the
+# paper as found.
+#
+# FALSIFIED IF: any taper cell separates from the 256 default after
+# Bonferroni, in either direction.
+#
+# CONTROLS. Identical seeds, identical protocol, identical trend branch, one
+# block per stack, no weight sharing, ag0 throughout, latent_dim pinned at 32.
+# Protocol cloned exactly from m4_trunk_width_attribution.yaml. Only
+# ae_intermediate_width varies.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_ae_taper_sweep.yaml
+# ============================================================
+
+experiment_name: m4_ae_taper_sweep
+category: attribution
+description: >
+  Sweeps the AE backbone intermediate (taper) width at a fixed latent
+  bottleneck on an alternating Trend + WaveletV3AE (haar) stack, discharging
+  the K8yb Q(iv) commitment that only the bottleneck d had been swept.
+
+dataset: m4
+periods:
+  - Yearly
+  - Monthly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Yearly: 10
+    Monthly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: false
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  t_width: 256              # trend branch pinned across every arm
+  trend_thetas_dim: 3
+  thetas_dim: 5
+  basis_dim: eq_fcast
+  g_width: 512              # AE trunk width U, pinned
+  wavelet_type: haar
+  latent_dim: 32            # bottleneck d, FIXED across the sweep
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - second_block
+  - ae_intermediate_width
+
+configs:
+  - name: T+HaarV3AE_10s_ld32_iw128
+    stacks: {type: alternating, blocks: [Trend, WaveletV3AE], repeats: 5}
+    block_params: {ae_intermediate_width: 128}
+    extra_fields: {second_block: WaveletV3AE, ae_intermediate_width: 128}
+
+  # U/2 -- reproduces the historical hardcoded default exactly
+  - name: T+HaarV3AE_10s_ld32_iw256
+    stacks: {type: alternating, blocks: [Trend, WaveletV3AE], repeats: 5}
+    block_params: {ae_intermediate_width: 256}
+    extra_fields: {second_block: WaveletV3AE, ae_intermediate_width: 256}
+
+  - name: T+HaarV3AE_10s_ld32_iw384
+    stacks: {type: alternating, blocks: [Trend, WaveletV3AE], repeats: 5}
+    block_params: {ae_intermediate_width: 384}
+    extra_fields: {second_block: WaveletV3AE, ae_intermediate_width: 384}
+
+  - name: T+HaarV3AE_10s_ld32_iw512
+    stacks: {type: alternating, blocks: [Trend, WaveletV3AE], repeats: 5}
+    block_params: {ae_intermediate_width: 512}
+    extra_fields: {second_block: WaveletV3AE, ae_intermediate_width: 512}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_ae_taper_sweep_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true

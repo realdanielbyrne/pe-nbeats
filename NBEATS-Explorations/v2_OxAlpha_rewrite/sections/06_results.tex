@@ -1,0 +1,204 @@
+% =========================================================================
+% Results fragment for "Frozen Basis Time Series Forecasting"
+% (camera-ready rewrite of NeurIPS submission 30981).
+%
+% Governing documents: paper_rewrite_plan.md §6 (results subplan) and
+% Part II §16--§18 (frontier table, capture law, trunk sweep),
+% notation_and_taxonomy_spec.md §7 (identity marking rules) and §8
+% (surviving table labels), rebuttal responses ovPT/y8d1/K8yb.
+%
+% Decisions honoured here (not reopened):
+%   * NHiTS transfer stays as a small scoped subsection.
+%   * The Transformer/LLM study is withdrawn and does not appear.
+%   * In-sweep numbers only in tables; the out-of-sweep Tourism 20.864
+%     result appears as a clearly labelled prior finding (plan §12).
+%   * No sentence attributes an effect to a named wavelet family on an
+%     identity cell; the daggers carry the disclosure instead.
+%   * Tables are referenced only through surviving spec §8 labels; this
+%     fragment defines no new tab: labels. The owner of
+%     tab:main_leaderboard must keep the caption-inline identity
+%     explanation required by spec §8.
+% =========================================================================
+
+\section{Results on the Accuracy--Size Frontier}
+\label{sec:results}
+
+\subsection{Per-period leaderboards}
+\label{sec:results:m4}
+
+Every comparison in this section is a single model against our own
+single-model reruns of the \citet{oreshkin2020nbeats} baselines under
+identical protocol, schedule, seeds and codebase. The published M4
+figures are 180-model ensembles and are never quoted beside a
+single-model number; that mismatch is how the submitted version acquired
+a headline it could not defend. The reference reruns score 13.564 on
+Yearly, 13.307 on Monthly, 6.974 on Weekly, 3.062 on Daily, and 8.906 on
+Hourly.
+
+Table~\ref{tab:main_leaderboard} reports the per-period winners under
+the paper-sample protocol, and Table~\ref{tab:m4_yearly_full} through
+Table~\ref{tab:m4_hourly_full} give the full top-five lists per period
+in the appendix. Four disclosures travel with those tables rather than
+waiting in an appendix. First, the historic Yearly, Weekly, Monthly and
+Daily winning cells carried wavelet family names whose forecast bases
+were in fact the identity matrix at those horizons; the accuracy numbers
+stand because real wavelets score where the identity scores, but the
+labels do not, and the double dagger marks every such cell with the
+explanation given in the leaderboard caption itself. Second, the Hourly
+entry of the earlier draft was the best of sixteen configurations in its
+study and does not reproduce; an independent rebuild lands at 8.885
+against the quoted 8.751, so it is replaced by a pre-specified arm. The
+rank-tiered frozen-basis arms reach 8.766 with the Karhunen--Lo\`eve
+basis and 8.788 with the discrete cosine basis against the 8.758
+baseline, indistinguishable from each other (spread 0.022,
+$p = 0.770$); the gain there is the tiering form, not a better basis.
+Third, Quarterly and Hourly are won outright by the N-BEATS-I+G
+baseline, which stays on the leaderboard as such. Fourth, the marked
+Hourly baseline row uses the forecast-head activation, a repository
+extension rather than a paper-faithful configuration.
+
+\subsection{The frontier claim}
+\label{sec:results:frontier}
+
+The claim is the shape of the accuracy-against-size curve, not accuracy.
+Table~\ref{tab:sub1m_frontier} states it once and precisely, two rows
+per period: the most accurate frozen-basis arm, and the smallest arm
+within 0.05 sMAPE of its baseline. On the accuracy rows there is not one
+significant loss on any M4 period; the single significant difference is
+Weekly, where the compact arm wins by 0.222 sMAPE at $p = 0.038$. On the
+minimal rows every period sits within 0.048 sMAPE of its baseline at
+15 to 74 times fewer parameters, with one significant difference, Daily
+at $+0.048$, $p = 0.031$, reported for completeness rather than as a
+finding. Parameter counts include the frozen basis matrices, and the
+largest ratio anywhere in the paper is 51$\times$. Compression and
+accuracy genuinely trade: Hourly buys parity at 2.4$\times$ or
+$+0.165$ sMAPE at 51$\times$, and Daily buys $-0.026$ at 10$\times$ or
+$+0.048$ at 74$\times$. Traffic-96 is a loss, 29.37 against 26.24 at
+1.81M against 52.3M parameters, and it is printed in the same table as
+the wins; burying it would make every other row read as advocacy.
+
+\subsection{Stability and ablations}
+\label{sec:results:stability}
+
+The negative results are as important as the winners. Overparameterized
+generic stacks are unstable: the 30-stack paper baseline is bimodal on
+Quarterly ($15.40 \pm 9.97$), Weekly ($8.78 \pm 4.61$), and Daily
+($10.21 \pm 12.01$) under the paper-sample protocol even though its best
+seeds look competitive. The failure mode is now measured rather than
+hypothesized. Diverged runs place negative forecasts on positive series,
+sMAPE scores any such point at its ceiling of exactly 200 whatever the
+magnitude, diverged runs put 7.1--7.8\% of their points below zero, and
+the fraction scoring 200 equals the fraction below zero to every digit.
+Deleting exactly those points recovers the converged score to within
+0.11 sMAPE, and rectifying the output removes the failure mode by
+construction on non-negative targets, cutting collapses from 107 of
+23{,}786 runs to 0 of 136. Rectification destroys cancellation between
+signed corrections on sub-band designs, so it is an architecture-scoped
+rule rather than a universal one. A paired trend branch repairs the same
+conditioning failure without adding expressive power: at complete rank
+the discrete cosine arm goes from 28.748 to 9.111 and the
+Karhunen--Lo\`eve arm from 27.607 to 9.291, in both cases from 0 of 10
+seeds converging to 10 of 10 at $p = 0.00018$, with a no-trend control
+still at 0 of 10.
+
+The component ablations resolve cleanly and mostly against the submitted
+story. Trunk width is inert across a 48.8-fold parameter range, with
+Kruskal--Wallis $p = 0.776$ on Yearly and $p = 0.773$ on Monthly over
+160 runs; matched on width, wavelet against Fourier basis is null at
+every rung with no raw $p$ below 0.34. The learned latent gate is null
+across twelve comparisons, smallest $p = 0.24$, though the ungated Daily
+arm carries a heavy tail the gated one lacks, so the gate may buy
+stability rather than accuracy. The AE bottleneck buys no accuracy at
+matched budget, 13.655 at 8.31M parameters against a generic baseline at
+13.564 and 8.22M. Rank tiering beats offset tiering by 0.138 sMAPE at
+$p = 0.037$ for an ordered basis while changing nothing for a scrambled
+one ($p = 0.695$); the claim that tiering helps does not survive, and
+what predicts anything is horizon length and band structure. The
+forecast-head activation eliminates the stuck-mode failure entirely
+wherever it was tested, including the small-data regime where 63--64\%
+of generic-stack seeds stalled; its evidence table is
+Table~\ref{tab:active_g_ablation}, the tiering evidence is
+Table~\ref{tab:tiered_per_period}, and the scheduler matched pairs are
+in Table~\ref{tab:lr_matched}.
+
+\subsection{Transfer to the NHiTS backbone}
+\label{sec:results:nhits}
+
+A scoped transfer question survives from the submitted draft: do the
+block-level effects survive a change of backbone? Curated subsets of the
+block library were rerun on NHiTS \citep{challu2023nhits}, which wraps
+the same block interface in multi-rate input pooling and hierarchical
+forecast interpolation, on Weather-96 and Traffic at horizons
+$\{96, 192, 336, 720\}$ under MSE loss, 100 epochs, and eight seeds, with
+the published pooling schedules unchanged. The answer divides cleanly.
+The block interface transfers: frozen-basis-plus-trend blocks lead at
+the short horizon where the lookback-to-horizon ratio is largest, and
+AE-trunk bottleneck variants lead at long horizons of 336 and 720. The
+hyperparameters do not transfer: the activation that is decisive on
+M4-Hourly is neutral to negative here, and the optimal stack pattern,
+bottleneck width, and scheduler all stay dataset- and architecture
+dependent. One apparent winner involving a variational trunk is treated
+as NHiTS-specific and is not carried into any recommendation. The scope
+is honest and narrow: one short-epoch training regime, eight seeds, and
+high per-cell variance, so the Traffic-horizon detail stays in the
+appendix with that caveat attached rather than in a leaderboard.
+
+\subsection{Out-of-distribution evaluation}
+\label{sec:results:ood}
+
+The findings condense to one compact configuration fixed before the
+test: ten stacks, a uniform-128 trunk, a frozen complete-rank forecast
+basis of any family, a truncated backcast basis, a rectified output
+head, and a paired trend branch. On Tourism, over 240 runs across the
+three horizons, it lands within the registered margin of 0.5 sMAPE of
+the better baseline on all three horizons at 14 to 15 times fewer
+parameters, with zero collapses. The narrow trunk holds out of sample,
+beating width 512 on all three horizons, significantly on Quarterly at
+$-0.622$, uncorrected $p = 0.031$. The same test demoted the trend branch
+to conditional against our registered prediction: it costs 0.344 sMAPE
+on Quarterly ($p = 0.021$) and 0.609 on Monthly ($p = 0.0073$), and
+earns its keep only at the shortest horizon, where it cuts the seed
+standard deviation at $H = 4$ from 8.12 to 0.46. Protocol-local winners
+are in Table~\ref{tab:tourism_winners}.
+
+One result from outside the registered sweeps must be placed honestly.
+An early targeted successive-halving study on Tourism-Yearly, run before
+the sweep design of Section~\ref{sec:setup} was fixed, produced a best
+configuration scoring 20.864 sMAPE, below the in-sweep Yearly winner.
+We report it here as a prior exploratory finding and nothing more: it
+was selected after the fact from a larger search under a different
+protocol, so it appears in no table, enters no comparison, and carries
+no significance statement.
+
+On Weather-96 an alternating frozen-basis-plus-trend stack with an AE-8
+trunk reaches $0.138 \pm 0.027$ MSE at 7.1M parameters against 0.183
+for the N-BEATS-I+G baseline. On Milk the small-data version of the
+stability pattern reproduces: the generic baselines diverge at high
+rates while the AE-trunk variants converge reliably, and the 10-stack
+winner scores $1.512 \pm 0.572$ against a 1.785 baseline reference.
+Traffic-96 remains the outright loss already printed in
+Table~\ref{tab:sub1m_frontier}; whether the narrow-trunk default has a
+boundary there is stated as open in Section~\ref{sec:limitations}.
+
+\subsection{Cross-period generalists}
+\label{sec:results:generalists}
+
+When one configuration must run across all six M4 periods, two carry the
+best mean per-period ranks, in Tables~\ref{tab:generalist_paper}
+and~\ref{tab:generalist_sliding}. Under the paper-sample protocol an
+alternating frozen-basis-plus-trend pair with tiered offsets, ten
+stacks, averages rank 13.33 of 108 and places top-11 on every period at
+5--6M parameters. Under the sliding-window protocol the corresponding
+leader is the same family of alternating stacks with a doubled backcast
+basis rank, mean rank 12.7 of 112 at 16.25M parameters. Where
+reproducing \citet{oreshkin2020nbeats} or guaranteed convergence matters
+more than rank, the 30-stack interpretable baseline is the alternative
+of record, mean rank 16.0 of 68 at 38--44M parameters, with zero
+divergence observed. Both generalist tables keep their historical ranks
+with a footnote: those ranks were computed within pools that still
+contained wavelet-family duplicates and identity-basis cells, so they
+understate no competitor and are not recomputed under the collapsed
+taxonomy.
+
+
+

@@ -1058,10 +1058,12 @@ def run_single_experiment(
     thetas_dim_override=None,
     latent_dim_override=None,
     latent_gate_fn="sigmoid",
+    ae_intermediate_width=None,  # AE-backbone taper width; None → units // 2 (historical shape)
     trend_thetas_dim=None,
     lr_scheduler_config=None,
     optimizer_name="Adam",
     learning_rate=None,  # None → uses module-level LEARNING_RATE constant
+    weight_decay=None,  # L2 weight decay; None → optimizer's own default (Adam 0.0, paper-faithful)
     loss_override=None,  # None → uses module-level LOSS constant
     normalize=False,
     val_ratio=None,
@@ -1227,6 +1229,7 @@ def run_single_experiment(
                 learning_rate=(
                     learning_rate if learning_rate is not None else LEARNING_RATE
                 ),
+                weight_decay=weight_decay,
                 optimizer_name=optimizer_name,
                 no_val=False,
                 lr_scheduler_config=lr_scheduler_config,
@@ -1246,6 +1249,7 @@ def run_single_experiment(
                 activation=activation,
                 latent_dim=effective_latent_dim,
                 latent_gate_fn=latent_gate_fn,
+                ae_intermediate_width=ae_intermediate_width,
                 basis_dim=basis_dim,
                 basis_offset=basis_offset,
                 stack_basis_offsets=stack_basis_offsets,
@@ -1259,6 +1263,7 @@ def run_single_experiment(
                 learning_rate=(
                 learning_rate if learning_rate is not None else LEARNING_RATE
                 ),
+                weight_decay=weight_decay,
                 optimizer_name=optimizer_name,
                 no_val=False,
                 lr_scheduler_config=lr_scheduler_config,

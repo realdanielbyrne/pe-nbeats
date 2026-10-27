@@ -148,6 +148,7 @@ training:
   loss: SMAPELoss          # any name from constants.LOSSES
   optimizer: Adam          # Adam | SGD | RMSprop | Adagrad | Adadelta | AdamW
   learning_rate: 0.001
+  weight_decay: null       # L2 weight decay; null = optimizer's own default (Adam 0.0, paper-faithful). Explicit values (incl. 0.0) are forwarded.
   max_epochs: 100
   patience: 10             # EarlyStopping patience
   n_blocks_per_stack: 1
@@ -236,6 +237,7 @@ Notes:
 block_params:
   thetas_dim: 5            # Bottleneck projection dimension
   latent_dim: 4            # AE backbone latent space size
+  ae_intermediate_width: null  # AE backbone taper (intermediate) layer width (null = units // 2)
   basis_dim: 128           # WaveletV3 basis dimension
   forecast_basis_dim: null # WaveletV3 asymmetric forecast basis (null = same as basis_dim)
   trend_thetas_dim: null   # Trend polynomial degree override (null = use thetas_dim)

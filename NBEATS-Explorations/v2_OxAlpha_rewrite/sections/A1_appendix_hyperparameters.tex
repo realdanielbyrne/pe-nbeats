@@ -1,0 +1,377 @@
+% =========================================================================
+% A1 — Hyperparameters and empirical defaults.
+%
+% Fragment for "Frozen Basis Time Series Forecasting" (camera-ready rewrite
+% of NeurIPS submission 30981). The assembler inserts \appendix.
+%
+% Governing documents: notation_and_taxonomy_spec.md §3 (API names appear
+% here exactly once, mapped to the Section-2 symbols), §8 rows 7–11
+% (table dispositions; tab:wavelet_per_period is DROPPED under the family
+% null and is not reproduced), §4 (drop list rewritten as prose);
+% paper_rewrite_plan.md §6 App B subplan, §12 loose ends.
+%
+% Discharged here:
+%   * API-name tokens (trend_thetas_dim, latent_dim, basis_dim, active_g)
+%     appear once, in tab:hyperparams_defaults, mapped to p / d / d_b / †.
+%   * No sum_losses or cross-normalization comparison appears anywhere.
+%   * The withdrawn "0.48M model, top-5 on Y/D/H" claim does not appear
+%     (corrections ledger item 8).
+% =========================================================================
+
+\section{Hyperparameters and Empirical Defaults}
+\label{app:hyperparams}
+
+This appendix is the single reference for every hyperparameter exposed by
+the model classes used in this paper. For each hyperparameter we report
+(i) the constructor default in the released package, (ii) the value used in
+the M4 sweeps of Section~\ref{sec:results}, and (iii) the swept range when
+applicable. Recommendations are M4-only; out-of-distribution deltas are
+summarized in Sections~\ref{sec:setup:data} and~\ref{sec:results:ood}.
+Every constructor keyword below is named exactly once here and mapped to
+the symbol it instantiates in Section~\ref{sec:method}; elsewhere in the
+paper only symbols appear.
+
+\subsection{Code defaults versus paper-sweep values}
+\label{app:hyperparams:defaults}
+
+Table~\ref{tab:hyperparams_defaults} enumerates the keyword surface. The
+constructor defaults define the released package; the paper-sweep column
+lists the value or grid actually used. Where the sweep value disagrees with
+the default --- most notably weight sharing within a stack --- the override
+is documented in Appendix~\ref{app:protocol:faithful}.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Constructor defaults and the values used in this paper's M4 sweeps.
+The symbol column gives the corresponding quantity from the dimension table
+of Section~\ref{sec:method}. The historical basis-family shortlist of the
+frozen-basis generator is provenance only; family identity carries no claim
+anywhere in this paper (Section~\ref{sec:method_identity}).}
+\label{tab:hyperparams_defaults}
+\begin{tabular}{@{}llll@{}}
+\toprule
+Keyword & Symbol & Constructor default & Paper sweep value (M4) \\
+\midrule
+\multicolumn{4}{l}{\textit{Optimization}} \\
+\texttt{loss} & --- & \texttt{SMAPELoss} & \texttt{SMAPELoss} \\
+\texttt{optimizer\_name} & --- & \texttt{Adam} & \texttt{Adam} ($\beta_1{=}0.9$, $\beta_2{=}0.999$) \\
+\texttt{learning\_rate} & $\eta_0$ & $10^{-3}$ & $10^{-3}$ \\
+\texttt{sum\_losses} & --- & \texttt{False} & \texttt{False} \\
+\texttt{kl\_weight} & --- & $10^{-3}$ & $0.1$, variational trunks only\phantom{0}\textsuperscript{*} \\
+\midrule
+\multicolumn{4}{l}{\textit{Stack composition}} \\
+\texttt{stack\_types} & $S$ & \emph{required} & per configuration \\
+\texttt{n\_blocks\_per\_stack} & --- & $1$ & $1$ \\
+\texttt{share\_weights} & --- & \texttt{False} & \texttt{True} (paper-sample) \\
+\texttt{active\_g} & $\dagger$ & \texttt{False} & swept $\{\text{\texttt{False}}, \text{\texttt{'forecast'}}\}$ \\
+\midrule
+\multicolumn{4}{l}{\textit{Trunk widths}} \\
+\texttt{g\_width} & $U$ & $512$ & $512$ \\
+\texttt{s\_width} & --- & $2048$ & $2048$ \\
+\texttt{t\_width} & --- & $256$ & $256$ \\
+\texttt{ae\_width} & --- & $512$ & $512$ \\
+\midrule
+\multicolumn{4}{l}{\textit{Block-level priors}} \\
+\texttt{latent\_dim} & $d$ & $5$ & swept $\{8, 16, 32\}$ \\
+\texttt{basis\_dim} & $d_b$, $d_f$ & $32$ & per period: rank $H$ or $2H$ \\
+\texttt{forecast\_basis\_dim} & --- & \texttt{None} & not used on M4 \\
+\texttt{trend\_thetas\_dim} & $p$ & $3$ & swept $\{3, 5\}$ \\
+\texttt{wavelet\_type} & prov. & \texttt{db3} & four-family shortlist\textsuperscript{*} \\
+\texttt{backcast\_wavelet\_type} & prov. & \texttt{None} & Traffic-96 only \\
+\texttt{forecast\_wavelet\_type} & prov. & \texttt{None} & Traffic-96 only \\
+\midrule
+\multicolumn{4}{l}{\textit{Cross-stack residuals}} \\
+\texttt{skip\_distance} & --- & $0$ & $0$ \\
+\texttt{skip\_alpha} & --- & $0.1$ & not exercised on M4 \\
+\bottomrule
+\end{tabular}\\[0.3em]
+\begin{minipage}{0.92\linewidth}
+\footnotesize
+\textsuperscript{*}\,Variational-trunk configurations were withdrawn from
+every leaderboard after submission (Appendix~\ref{app:ablations:doesnotwork});
+the row records the constructor surface for reproducibility of the released
+CSVs. The four-family shortlist and its identity-basis disclosure are
+restated in the family-null appendix; no accuracy statement in this paper
+depends on which family filled the basis slot.
+\end{minipage}
+\end{table}
+
+\paragraph{Lookback and forecast multiplier.} For all M4 cells we use
+$L = 5H$. The paper-sample protocol additionally clamps the valid sampling
+window to the trailing $L_h \cdot H$ observations, with $L_h = 1.5$ on
+Yearly and Quarterly and $L_h = 10$ elsewhere
+(Appendix~\ref{app:protocol:faithful}).
+
+\subsection{Architectural sweep grids}
+\label{app:hyperparams:grids}
+
+Table~\ref{tab:sweep_grids} lays out the grid executed for each variant of
+the taxonomy (Section~\ref{sec:method_variants}) in the 112-configuration
+comprehensive sweep (sliding) and the curated 53-configuration subset rerun
+under both paper-sample variants. Variant names are those of the taxonomy
+table; no encoded configuration strings appear in this paper. The frozen
+basis in every basis-carrying row is any complete orthonormal basis --- the
+family axis was swept historically and shown inert at complete forecast
+rank (Sections~\ref{sec:method_heads}
+and~\ref{sec:method_identity}); the historical shortlist of four families is
+recorded in the released CSVs.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Hyperparameter grids per variant. ``---'' means the parameter does
+not apply to the variant. All rows share weights within stacks. $d_b$ is
+written ``$H$'' when the backcast rank equals the horizon and ``$2H$'' when
+doubled (Section~\ref{sec:setup}). $\dagger$ marks the forecast-head output
+activation, an extension beyond \citet{oreshkin2020nbeats}; paper-faithful
+claims exclude $\dagger$ cells throughout.}
+\label{tab:sweep_grids}
+\begin{tabular}{@{}llllll@{}}
+\toprule
+Variant & $S$ & $p$ & $d_b$ & AE latent $d$ & $\dagger$ \\
+\midrule
+N-BEATS-G   & $\{10, 30\}$ & ---       & ---              & ---           & $\{$off, on$\}$ \\
+N-BEATS-I+G & $\{10, 30\}$ & $3$       & ---              & ---           & $\{$off, on$\}$ \\
+FB+T (unified layout)    & $\{10, 30\}$ & $\{3, 5\}$ & $\{H,\,2H\}$ & ---         & off \\
+FB+T (alternating)       & $\{10, 30\}$ & $3$ & $\{H,\,2H\}$         & ---           & $\{$off, on$\}$ \\
+FB+T (alternating, AE trunk)      & $\{10, 30\}$ & $3$ & $H$ & $\{16, 32\}$ & $\{$off, on$\}$ \\
+FB+T (unified, AE trunk)          & $10$ & $3$ & $H$                & $\{8, 16, 32\}$ & $\{$off, on$\}$ \\
+FB+T (unified, gated AE trunk)    & $10$ & $3$ & $H$                & $\{16, 32\}$ & $\{$off, on$\}$ \\
+FB+T+G (unified, gated AE trunk)  & $10$ & $3$ & $H$                & $\{16, 32\}$ & $\{$off, on$\}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Training-protocol hyperparameters (sliding window)}
+\label{app:hyperparams:sliding}
+
+The two paper-sample variants are documented in
+Appendix~\ref{app:protocol}. The sliding-window protocol used by the
+comprehensive sweep trains epoch-by-epoch with the sMAPE loss and Adam at
+$10^{-3}$, batches drawn by sliding the lookback over each series; at most
+75 epochs with a minimum of 10, early-stop patience 20 epochs and a minimum
+improvement of $10^{-3}$, and a cosine schedule with a 15-epoch linear
+warmup decaying to a floor of $10^{-6}$. Sub-epoch validation is not needed
+under sliding because each epoch's validation pass evaluates the natural
+held-out tail of every series.
+
+\subsection{Per-period recommendations}
+\label{app:hyperparams:perperiod}
+
+The subsections below are the empirical findings that came out of the M4
+sweeps. Numbers are taken verbatim from the meta-analysis report
+regenerated by the script named in Appendix~\ref{app:protocol:repro};
+absolute sMAPE is never compared across sampling protocols.
+
+\subsubsection{LR scheduler by period and protocol}
+\label{app:hyperparams:lr}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Recommended LR scheduler per (period, protocol). Plateau:
+\texttt{ReduceLROnPlateau}, patience 3 val-check units, factor 0.5,
+cooldown 1, minimum learning rate $10^{-6}$. Step-paper: MultiStepLR with
+ten evenly spaced milestones, rate multiplied by 0.5 at each.
+Cosine-warmup: 15-epoch linear warmup then cosine annealing to $10^{-6}$.}
+\label{tab:lr_per_period}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Period & Paper-sample & Sliding \\
+\midrule
+Yearly    & step-paper (neutral; either works) & cosine-warmup \\
+Quarterly & \textbf{plateau} ($-0.029$, $n=30$) & cosine-warmup \\
+Monthly   & \textbf{plateau} ($-0.089$, median $-0.198$, $n=18$) & cosine-warmup \\
+Weekly    & step-paper (plateau regresses by $+0.20$ at $n=10$; locked out) & cosine-warmup \\
+Daily     & \textbf{plateau} ($-0.028$, $n=13$) & cosine-warmup \\
+Hourly    & step-paper (head-to-head not yet run on all novel variants) & cosine-warmup \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Mandatory pairing.} The plateau scheduler under paper sampling
+requires sub-epoch validation: \texttt{val\_check\_interval}$=100$,
+early-stop patience 20 val-check units, minimum improvement $10^{-3}$.
+Without these, stopping fires on the first warmup-corrupted check and
+collapses the run to epoch zero or one
+(Appendix~\ref{app:protocol:faithful}). Matched-pair evidence for this
+table is in Appendix~\ref{app:ablations:lr}.
+
+\subsubsection{Sampling protocol verdict per period}
+\label{app:hyperparams:sampling}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Sampling-protocol verdict per M4 period. $\Delta =$ sliding
+$-$ paper-sample on the best configuration of each protocol; negative
+$\Delta$ favors sliding. Absolute sMAPE within a row is not comparable
+across protocols (Appendix~\ref{app:protocol}).}
+\label{tab:protocol_per_period}
+\begin{tabular}{@{}llllll@{}}
+\toprule
+Period & $H$ & Best sliding & Best paper-sample & $\Delta$ & Winner \\
+\midrule
+Yearly    & $6$  & $13.499$ & $13.542$ & $\approx 0$ & tie \\
+Quarterly & $8$  & $10.127$ & $10.313$ & $-0.19$ & \textbf{sliding} \\
+Monthly   & $18$ & $13.279$ & $13.240$ & $+0.04$ & paper-sample \\
+Weekly    & $13$ & $\phantom{0}6.671$ & $\phantom{0}6.735$ & $-0.06$ & sliding \\
+Daily     & $14$ & $\phantom{0}2.588$ & $\phantom{0}3.012$ & $\mathbf{-0.42}$ & \textbf{sliding} \\
+Hourly    & $48$ & $\phantom{0}8.587$ & $\phantom{0}8.758$ & $-0.17$ & \textbf{sliding} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For the paper-faithful comparison to \citet{oreshkin2020nbeats} we report
+paper-sample numbers in the main body. For absolute-sMAPE leaderboards on
+the long-horizon periods (Quarterly, Daily, Hourly), sliding is the
+stronger protocol. The two are never mixed within one leaderboard.
+
+\subsubsection{Basis family per period: disposition under the family null}
+\label{app:hyperparams:basisfamily}
+
+An earlier draft carried a ``best basis family per period'' table. That
+table is withdrawn, for two reasons now argued in the main text. First, at
+complete forecast rank with linear synthesis, basis identity is inert:
+36 paired comparisons across families at complete rank produced no
+significant difference (smallest $p = 0.084$), and the cross-dataset
+``wavelet family matters'' claim was retracted (Fisher combined
+$p = 0.125$ over eight datasets; Table~\ref{tab:corrections_ledger}).
+Second, part of that table compared identity-basis cells against each
+other --- several historical family labels on M4 degenerated to the
+identity matrix at those horizons, so ``which family wins'' was partly
+identity versus identity (Section~\ref{sec:method_identity}).
+
+What survives here is narrow and stated for completeness of the record.
+(i) The historical sweep used a four-family shortlist plus one further
+family that was tested and dropped because it produced no per-period leader
+under either protocol; neither fact carries an accuracy claim.
+(ii) On Hourly every swept family was genuine, and the family null holds
+there on its own. (iii) Per-period recommendations in this appendix are
+therefore statements about variant, rank, trunk, layout, and schedule only;
+the family that filled each frozen basis is provenance in the released CSVs
+and is disclosed cell-by-cell through the identity marker where applicable.
+
+\subsubsection{Block-level rules}
+\label{app:hyperparams:block}
+
+Each rule below summarizes a matched-seed finding from the sweep CSVs;
+the ablation evidence lives in Appendix~\ref{app:ablations}.
+
+\paragraph{Basis ranks ($d_b$, $d_f$).} Use rank $H$ (the horizon-matched
+default) on both paths. At convergence the spread among the tested rank
+labels is below 0.014 sMAPE on M4-Yearly across fourteen historical
+families and three datasets; the apparent advantage of larger labels early
+in training is a convergence-speed artifact. Avoid the half-horizon
+forecast rank for $H \leq 8$: no run with it reached the converged regime
+on M4-Yearly in the AE-trunk sweep. Unified-layout blocks are more
+rank-sensitive (spread 0.37 sMAPE), so the horizon-matched default matters
+most there.
+
+\paragraph{AE latent width ($d$).} Where a gated AE trunk is used, $d = 16$
+is the default ($n \geq 600$ runs, $p < 0.02$ against $32$ on both
+M4-Yearly and Tourism-Yearly). For the ungated AE trunk, $d \in \{5, 8\}$
+are statistically equivalent (Mann--Whitney $p = 0.71$, $n = 330$ each),
+and $d = 2$ is catastrophically underparameterized
+($p < 3 \times 10^{-20}$ against $\{5, 8\}$).
+
+\paragraph{Trend polynomial order ($p$).} Use $p = 3$ for $H \leq 10$ and
+$p = 5$ for $H \geq 50$. Significant on Tourism-Yearly ($H = 4$,
+$p = 0.008$, favoring 3) and on Weather-96 ($H = 96$, $p = 0.042$,
+favoring 5) at convergence. The mid-horizon periods (Monthly $H = 18$,
+Weekly $H = 13$, Daily $H = 14$) default to 3 on insufficient evidence. An
+earlier ``always 3'' finding was a 10-epoch convergence-speed artifact on
+Weather-96 and reversed at 50 epochs.
+
+\paragraph{Trend backbone hierarchy.} On M4, for alternating trend-plus-
+frozen-basis stacks, the ordering is untruncated trunk $>$ gated AE trunk
+$>$ plain AE trunk. The plain AE bottleneck homogenizes the basis signal in
+alternating configurations ($\eta^2 = 0.003$, not significant) and is not
+viable there; the learned gate restores competitiveness. On Weather-96 and
+Milk the hierarchy reverses (plain AE $>$ gated AE, Mann--Whitney
+$p = 0.036$ on Weather); those datasets are out of scope for this appendix.
+
+\paragraph{Stack ordering.} Always place polynomial trend stacks before
+frozen-basis, generic, or seasonality stacks. In the ordering study
+(M4-Yearly and Weather-96) every significantly different pair favored
+trend-first --- including one Bonferroni-significant pair on M4
+(Cohen's $r = 0.83$) --- and no pair favored the reverse. Treat this as a
+fixed convention, not a hyperparameter to search.
+
+\paragraph{Unified versus alternating layout.} Under the paper-sample
+protocol on M4, alternating single-branch stacks beat the unified layout by
+roughly ten mean-rank points (14.1 vs.\ 24.3 across the 53 curated
+configurations over six periods). Default to alternating whenever the
+larger parameter budget is acceptable; reserve the unified layout, or its
+AE-trunk forms, for parameter-constrained scenarios. The plateau scheduler
+flipped the Monthly winner to the unified layout at thirty stacks
+($13.240$); on every other period alternating is at least co-optimal.
+
+\paragraph{Forecast-head activation ($\dagger$).} Off (the constructor
+default) is the robust choice on M4 and the paper-faithful setting.
+Switched on for the forecast head only, it helps on Hourly --- every paper
+backbone gains 0.07--0.15 sMAPE there --- and ties or loses on every other
+period (Appendix~\ref{app:ablations:activeg}). It is an extension beyond
+\citet{oreshkin2020nbeats}: paper-faithful claims exclude $\dagger$ cells.
+
+\paragraph{Not exercised on M4.} Cross-stack residual injection
+(\texttt{skip\_distance}, named once here per the API-name convention)
+never helped on M4 in the configurations tested and slightly hurt deep
+stacks. The auxiliary backcast-reconstruction loss term defaults to off and
+is reserved for a dedicated convergence study; no result in this paper
+compares across it.
+
+\subsection{Excluded configurations}
+\label{app:hyperparams:droplist}
+
+The configuration classes below were excluded \emph{a priori} from the
+curated paper-sample subset and from every headline leaderboard; each is
+supported by at least one released CSV. Encoded names are replaced by
+descriptions, per the taxonomy of Section~\ref{sec:method_variants}.
+
+\begin{itemize}\itemsep -1pt
+\item \textbf{Bottleneck-generic blocks}: universally worst on M4.
+\item \textbf{Pure variational trunks}: mean sMAPE 55--68 on Quarterly,
+      Monthly, Weekly, and Daily, unusable (see also
+      Appendix~\ref{app:ablations:doesnotwork}).
+\item \textbf{Thirty-stack generic baseline on Quarterly, Weekly, Monthly}:
+      bimodal collapse, sMAPE standard deviation 7.4--9.5.
+\item \textbf{Cross-stack residual injection at distance five}: never helps
+      on M4.
+\item \textbf{One further basis family on M4}: no per-period leader under
+      either protocol; dropped from the shortlist without further claims.
+\item \textbf{Thirty-stack tiered configurations carrying the forecast-head
+      activation}: run-to-run divergence outliers.
+\item \textbf{Step-paper schedule on Quarterly, Monthly, Daily}: dominated
+      by the plateau scheduler (Table~\ref{tab:lr_per_period}).
+\item \textbf{Pure generic stacks with AE or gated-AE trunks}: bottom out
+      at mean rank approximately 38.
+\end{itemize}
+
+\subsection{Cross-period generalists}
+\label{app:hyperparams:generalists}
+
+When a single configuration must run across all six M4 periods --- cross-period
+reporting, ensemble bases, ablation harnesses --- three configurations
+dominate by mean per-period rank, in agreement with
+Section~\ref{sec:results:generalists}. Under the paper-sample protocol with
+all-six coverage, the leader is an alternating frozen-basis-plus-trend pair
+with tiered basis offsets, ten stacks: mean rank $13.33$ of 108,
+5.07--6.06M parameters, top-11 on every period. Where reproducing
+\citet{oreshkin2020nbeats}, or guaranteed convergence, matters more than
+rank, the thirty-stack interpretable baseline is the alternative of record:
+mean rank $16.0$ of 68, 38--44M parameters, zero divergence observed. Under
+the sliding protocol the leader is the same alternating family at thirty
+stacks with a doubled backcast basis rank: mean rank $12.7$ of 112,
+16.25M parameters; a smaller alternative with a gated AE trunk reaches
+3.66M parameters at mean rank $21.0$.
+
+Both generalist tables in Section~\ref{sec:results:generalists}
+(Tables~\ref{tab:generalist_paper} and~\ref{tab:generalist_sliding}) keep
+their historical ranks with a footnote: those ranks were computed within
+pools that still contained family duplicates and identity-basis cells, so
+they understate no competitor and are not recomputed under the collapsed
+taxonomy.
+
+

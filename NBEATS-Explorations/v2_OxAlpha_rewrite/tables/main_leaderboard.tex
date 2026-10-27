@@ -1,0 +1,56 @@
+% =========================================================================
+% tab:main_leaderboard — spec §8 disposition #5: RESTRUCTURE TO §5 SCHEMA.
+% Spec §8 "caption obligation": the identity-basis disclosure for the
+% Yearly/Weekly/Monthly/Daily winning cells is stated IN THIS CAPTION,
+% not deferred to the appendix. Scores/params/n verbatim from v1
+% L295-301; renderings per spec §6b; markers per spec §5/§7 (‡ inline on
+% Y/W/M/D winners; † on the Hourly baseline row). No family names appear:
+% the basis family left every table (spec §4); the marker carries the
+% disclosure.
+% =========================================================================
+
+\begin{table}[t]
+  \caption{Protocol-local winners used for the main comparison. M4 rows
+  use the paper-sample protocol; Weather-96 uses the comprehensive-sweep
+  protocol; absolute sMAPE is never compared across sampling protocols.
+  Tourism and Milk are summarized in the out-of-distribution appendix.
+  Scores are mean $\pm$ std over surviving seeds under the strict health
+  filter. Column conventions: all frozen-basis rows have complete forecast
+  rank ($d_f = H$) and trend order $p = 3$; ``---'' means the column does
+  not apply to a baseline variant. Markers: $^{\dag}$\,forecast-head
+  output activation (\texttt{active\_g}$=$\texttt{'forecast'}), a
+  \texttt{lightningnbeats} extension rather than part of the original
+  N-BEATS architecture of \citet{oreshkin2020nbeats}; claims of
+  paper-faithfulness exclude $^{\dag}$ rows;
+  $^{\ddag}$\,the frozen basis at this horizon was the identity matrix,
+  so the label ``wavelet'' does not apply to this cell.
+  \emph{Identity disclosure, stated here rather than in an appendix:} the
+  Yearly, Weekly, Monthly and Daily winning cells historically carried
+  structured-basis labels whose generating filter exceeds the minimum
+  length supportable at those horizons ($H = 6$, $13$, $18$, $14$), so the
+  constructed DWT basis degenerated to the identity matrix. The accuracy
+  numbers nevertheless stand: the identity is itself a complete
+  orthonormal basis, and by the rotation argument of Proposition~2 every
+  complete orthonormal forecast basis scores equivalently at convergence
+  --- real bases score where the identity scores; only the labels were
+  wrong. The identity matrix and the restated family null over genuinely
+  distinct bases are tabulated in Section~\ref{sec:method_identity}.
+  Parameter counts include the frozen basis matrices.}
+  \label{tab:main_leaderboard}
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{2.3pt}
+  \begin{tabular}{@{}llclclrlr@{}}
+    \toprule
+    Task & Variant & S & Layout & Trunk & Params & Score & $n$ & N-BEATS ref. \\
+    \midrule
+    M4-Yearly    & FB+T$^{\ddag}$        & 30 & alt & uniform-512 & 15.2M & $13.542 \pm 0.148$ & 10 & G-10: 13.564 \\
+    M4-Quarterly & N-BEATS-I+G           & 10 & --- & uniform-512 & 19.6M & $10.312 \pm 0.055$ & 10 & same \\
+    M4-Monthly   & FB+T$^{\ddag}$        & 30 & unif & uniform-512 & 6.8M  & $13.240 \pm 0.334$ & 9  & IG-30: 13.307 \\
+    M4-Weekly    & FB+T$^{\ddag}$        & 30 & alt & uniform-512 & 15.8M & $\phantom{0}6.735 \pm 0.203$ & 10 & IG-10: 6.974 \\
+    M4-Daily     & FB+T$^{\ddag}$        & 10 & alt, tiered & uniform-512 & 5.3M & $\phantom{0}3.014 \pm 0.035$ & 10 & IG-30: 3.062 \\
+    M4-Hourly    & N-BEATS-I+G$^{\dag}$  & 30 & --- & uniform-512 & 43.6M & $\phantom{0}8.758 \pm 0.099$ & 10 & IG-30: 8.906 \\
+    Weather-96   & FB+T (MSE)            & 30 & alt & AE-8        & 7.1M  & $\phantom{0}0.138 \pm 0.027$ & 10 & IG-10: 0.183 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

@@ -1,0 +1,56 @@
+% =========================================================================
+% tab:m4_weekly_full — spec §8 disposition #21: RESTRUCTURE TO §5 SCHEMA
+% with family dedup per §6c. Scores/std/params/n verbatim from v1
+% L990-1007. §6c deletions: in the step-paper block, T+Db3V3_30s_bdeq
+% (6.737 ± 0.256) and T+Sym10V3_30s_bdeq (6.858 ± 0.273) are identical up
+% to basis family to the kept representative T+Coif2V3_30s_bdeq
+% (6.735 ± 0.203); in the plateau re-validation block, TAE+DB3V3AE_30s_
+% tiered (6.955 ± 0.233) is identical up to family to TAE+Sym10V3AE_30s_
+% tiered (6.935 ± 0.223); in the sliding block, T+HaarV3_30s_bdeq
+% (6.675 ± 0.185) and T+Sym10V3_30s_bdeq (6.686 ± 0.168) are identical up
+% to family to T+Db3V3_30s_bdeq (6.671 ± 0.208). ‡ per spec §7: coif2/
+% sym10 are identity at H = 13; db3 and haar are genuine here.
+% =========================================================================
+
+\begin{table}[h]
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{2.5pt}
+  \caption{M4-Weekly ($H=13$, $L=65$) top-5: paper-sample under the
+  step-paper schedule, the plateau-LR re-validation cell ($n=10$;
+  regression), and sliding top-5. All rows: complete forecast rank
+  $d_f = H$, trend order $p = 3$. Scores are mean $\pm$ std over surviving
+  seeds under the strict health filter; absolute sMAPE is never compared
+  across protocols. Markers: $^{\dag}$\,forecast-head output activation
+  (\texttt{active\_g}), an extension beyond \citet{oreshkin2020nbeats};
+  $^{\mathrm{g}}$\,the historical run used the gated AE trunk (the gate is
+  null); $^{\ddag}$\,the frozen basis at this horizon was the identity
+  matrix, so the label ``wavelet'' does not apply to this cell.
+  Family dedup: entries identical up to the historical basis family are
+  collapsed to their best-scoring representative; further family variants
+  fall within the null band (Fisher $p = 0.125$); no score, std, or rank
+  is recomputed or pooled.}
+  \label{tab:m4_weekly_full}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{@{}clllcllrrr@{}}
+    \toprule
+    \multicolumn{10}{l}{\textit{Paper-sample (step-paper LR)}} \\
+    \midrule
+    \# & Variant & S & Layout & $d_b$ & Trunk & LR & sMAPE $\pm$ std & Params & $n$ \\
+    \midrule
+    1 & FB+T$^{\ddag}$           & 30 & alt         & H & uniform-512 & step       & $\mathbf{6.735 \pm 0.203}$ & 15.75M & 10 \\
+    2 & FB+T$^{\ddag}$           & 30 & alt, tiered & H & uniform-512 & step       & $6.907 \pm 0.293$          & 15.68M & 10 \\
+    3 & FB+T$^{\ddag}$           & 10 & alt         & H & uniform-512 & step       & $6.919 \pm 0.424$          & 5.25M  & 10 \\
+    \midrule
+    \multicolumn{10}{l}{\textit{Paper-sample (plateau LR re-validation, regression)}} \\
+    \midrule
+    1 & FB+T$^{\ddag}$           & 30 & alt, tiered & H & AE-32       & plateau    & $\mathbf{6.935 \pm 0.223}$ & 3.37M  & 10 \\
+    \midrule
+    \multicolumn{10}{l}{\textit{Sliding}} \\
+    \midrule
+    1 & FB+T                     & 30 & alt         & H & uniform-512 & cos-warmup & $\mathbf{6.671 \pm 0.208}$ & 15.75M & 10 \\
+    2 & FB+T$^{\mathrm{g}}$      & 30 & alt         & 2H & AE-$d$     & cos-warmup & $6.673 \pm 0.129$          & 3.66M  & 10 \\
+    3 & FB+T                     & 30 & alt         & 2H & uniform-512 & cos-warmup & $6.685 \pm 0.193$          & 15.85M & 10 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}

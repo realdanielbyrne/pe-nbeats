@@ -1,0 +1,51 @@
+% =========================================================================
+% tab:m4_quarterly_full — spec §8 disposition #19: RESTRUCTURE TO §5
+% SCHEMA with family dedup per §6c. Scores/std/params/n verbatim from
+% v1 L928-940. One §6c deletion: T+DB3V3_10s_tiered_ag0 (10.356 ± 0.053)
+% is identical up to basis family to T+Sym10V3_10s_tiered_ag0
+% (10.325 ± 0.053); the better-scoring representative is kept. One §6c
+% deletion in the sliding block: T+Coif2V3_30s_bd2eq (10.146 ± 0.045) is
+% identical up to family to T+Sym10V3_30s_bd2eq (10.127 ± 0.051).
+% ‡ per spec §7: db3/coif2/sym10 are identity at H = 8.
+% =========================================================================
+
+\begin{table}[h]
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{2.5pt}
+  \caption{M4-Quarterly ($H=8$, $L=40$) top-5: paper-sample (upper block)
+  and sliding (lower block). All rows: complete forecast rank $d_f = H$,
+  trend order $p = 3$. LR shows the per-cell schedule; the sliding block
+  uses cosine-warmup throughout. Scores are mean $\pm$ std over surviving
+  seeds under the strict health filter; absolute sMAPE is never compared
+  across protocols. Markers: $^{\dag}$\,forecast-head output activation
+  (\texttt{active\_g}), an extension beyond \citet{oreshkin2020nbeats};
+  $^{\mathrm{g}}$\,the historical run used the gated AE trunk (the gate is
+  null); $^{\ddag}$\,the frozen basis at this horizon was the identity
+  matrix, so the label ``wavelet'' does not apply to this cell.
+  Family dedup: entries identical up to the historical basis family are
+  collapsed to their best-scoring representative; further family variants
+  fall within the null band (Fisher $p = 0.125$); no score, std, or rank
+  is recomputed or pooled.}
+  \label{tab:m4_quarterly_full}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{@{}clllcllrrr@{}}
+    \toprule
+    \multicolumn{10}{l}{\textit{Paper-sample}} \\
+    \midrule
+    \# & Variant & S & Layout & $d_b$ & Trunk & LR & sMAPE $\pm$ std & Params & $n$ \\
+    \midrule
+    1 & N-BEATS-I+G              & 10 & ---         & --- & uniform-512 & plateau & $\mathbf{10.313 \pm 0.055}$ & 19.64M & 10 \\
+    2 & FB+T$^{\ddag}$           & 10 & alt, tiered & H   & uniform-512 & plateau & $10.325 \pm 0.053$          & 5.11M  & 10 \\
+    3 & FB+T$^{\ddag}$           & 30 & alt, tiered & H   & uniform-512 & step    & $10.345 \pm 0.065$          & 15.34M & 10 \\
+    4 & N-BEATS-I+G$^{\dag}$     & 10 & ---         & --- & uniform-512 & plateau & $10.354 \pm 0.115$          & 19.64M & 10 \\
+    \midrule
+    \multicolumn{9}{l}{\textit{Sliding}} \\
+    \midrule
+    1 & N-BEATS-I+G              & 10 & --- & --- & uniform-512 & cos-warmup & $\mathbf{10.127 \pm 0.068}$ & 19.64M & 10 \\
+    2 & FB+T$^{\ddag}$           & 30 & alt & 2H  & uniform-512 & cos-warmup & $10.127 \pm 0.051$          & 15.45M & 10 \\
+    3 & FB+T$^{\mathrm{g}}$      & 30 & alt & 2H  & AE-$d$      & cos-warmup & $10.144 \pm 0.048$          & 3.28M  & 10 \\
+    4 & FB+T$^{\ddag}$           & 10 & unif & H  & uniform-512 & cos-warmup & $10.147 \pm 0.056$          & 2.11M  & 10 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}

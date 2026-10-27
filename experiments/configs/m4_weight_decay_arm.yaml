@@ -1,0 +1,161 @@
+# ============================================================
+# Is the trunk-width null a REGULARISATION artifact? The weight-decay arm.
+#
+# COMMITMENT SOURCE. Reviewer ovPT, Q4 (NeurIPS 2026 rebuttal, Sub. 30981):
+# "A weight decay arm is missing and will be added in revision." ovPT's
+# question separates four candidate explanations for the reported gains --
+# inductive bias, regularisation, parameter count, protocol -- and the trunk
+# width study (m4_trunk_width_attribution) answered the parameter-count leg
+# without ever varying an explicit regulariser. This config adds the missing
+# regularisation leg: the SAME two backbones, the SAME protocol, with weight
+# decay swept over {0, 1e-4, 1e-3}.
+#
+# THE QUESTION. The trunk study found Trend+Seasonality and Trend+Wavelet
+# statistically indistinguishable at matched trunk width, with no explicit
+# regularisation anywhere in the pipeline. A skeptic can still ask: does the
+# null only hold because BOTH families are unregularised? If the learned
+# Fourier trunk is secretly overfitting and weight decay rescues it -- or if
+# the frozen-basis arm's advantage was implicit regularisation that explicit
+# decay replicates for free in the learned arm -- the attribution story
+# changes. Running the decay sweep on both families at the matched w512 rung
+# answers this directly.
+#
+# ARMS. 2 backbones x 3 weight_decay values = 6 configs:
+#   T+S_10s_sw512    (Trend + Seasonality, s_width=512)  x wd in {0, 1e-4, 1e-3}
+#   T+HaarV3_10s_gw512 (Trend + HaarWaveletV3, g_width=512) x wd in {0, 1e-4, 1e-3}
+# The wd=0 cells replicate the existing trunk-study cells
+# (m4_trunk_width_attribution: T+S_10s_sw512, T+HaarV3_10s_gw512) and anchor
+# the comparison against that study's numbers.
+#
+# REGISTERED PREDICTION, BEFORE THE RUNS. Weight decay does not close or open
+# any family gap: at every decay level the two families remain statistically
+# indistinguishable, and neither family's wd>0 cells improve on its own wd=0
+# cell beyond seed noise. The trunk null is not a regularisation artifact.
+#
+# FALSIFIED IF: either family separates from the other at any decay level
+# after Bonferroni, or explicit decay moves either family by more than the
+# within-cell seed spread. Reported however it falls.
+#
+# CONTROLS. Identical seeds, identical protocol, identical trend branch, one
+# block per stack, no weight sharing, ag0 throughout. Protocol cloned exactly
+# from m4_trunk_width_attribution.yaml. Only the second block type and the
+# weight_decay value vary.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_weight_decay_arm.yaml
+# ============================================================
+
+experiment_name: m4_weight_decay_arm
+category: attribution
+description: >
+  Adds the missing regularisation leg to the trunk-width attribution study:
+  Trend+Seasonality and Trend+HaarV3 at the matched w512 rung, with optimizer
+  weight decay swept over 0, 1e-4, and 1e-3.
+
+dataset: m4
+periods:
+  - Yearly
+  - Monthly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Yearly: 10
+    Monthly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: false
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  t_width: 256              # trend branch pinned across every arm
+  trend_thetas_dim: 3
+  thetas_dim: 5
+  basis_dim: eq_fcast
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - second_block
+  - weight_decay
+
+configs:
+  # ---- Trend + Seasonality at the matched w512 rung ----
+  - name: T+S_10s_sw512_wd0
+    stacks: {type: alternating, blocks: [Trend, Seasonality], repeats: 5}
+    block_params: {s_width: 512}
+    training: {weight_decay: 0.0}
+    extra_fields: {second_block: Seasonality, weight_decay: 0.0}
+
+  - name: T+S_10s_sw512_wd1e-4
+    stacks: {type: alternating, blocks: [Trend, Seasonality], repeats: 5}
+    block_params: {s_width: 512}
+    training: {weight_decay: 1.0e-4}
+    extra_fields: {second_block: Seasonality, weight_decay: 1.0e-4}
+
+  - name: T+S_10s_sw512_wd1e-3
+    stacks: {type: alternating, blocks: [Trend, Seasonality], repeats: 5}
+    block_params: {s_width: 512}
+    training: {weight_decay: 1.0e-3}
+    extra_fields: {second_block: Seasonality, weight_decay: 1.0e-3}
+
+  # ---- Trend + frozen wavelet basis at the matched w512 rung ----
+  - name: T+HaarV3_10s_gw512_wd0
+    stacks: {type: alternating, blocks: [Trend, HaarWaveletV3], repeats: 5}
+    block_params: {g_width: 512}
+    training: {weight_decay: 0.0}
+    extra_fields: {second_block: HaarWaveletV3, weight_decay: 0.0}
+
+  - name: T+HaarV3_10s_gw512_wd1e-4
+    stacks: {type: alternating, blocks: [Trend, HaarWaveletV3], repeats: 5}
+    block_params: {g_width: 512}
+    training: {weight_decay: 1.0e-4}
+    extra_fields: {second_block: HaarWaveletV3, weight_decay: 1.0e-4}
+
+  - name: T+HaarV3_10s_gw512_wd1e-3
+    stacks: {type: alternating, blocks: [Trend, HaarWaveletV3], repeats: 5}
+    block_params: {g_width: 512}
+    training: {weight_decay: 1.0e-3}
+    extra_fields: {second_block: HaarWaveletV3, weight_decay: 1.0e-3}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_weight_decay_arm_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true

@@ -92,6 +92,7 @@ class _NBeatsBase(pl.LightningModule):
         no_val: bool = False,
         optimizer_name: str = "Adam",
         learning_rate: float = 1e-3,
+        weight_decay: float = None,
         sum_losses: bool = False,
         kl_weight: float = 0.001,
         lr_scheduler_config: dict = None,
@@ -102,6 +103,7 @@ class _NBeatsBase(pl.LightningModule):
         self.no_val = no_val
         self.optimizer_name = optimizer_name
         self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
         self.sum_losses = sum_losses
         self.kl_weight = kl_weight
         self.lr_scheduler_config = lr_scheduler_config
@@ -129,8 +131,14 @@ class _NBeatsBase(pl.LightningModule):
                 f"Unknown optimizer name: {self.optimizer_name}. Please select one of {OPTIMIZERS}"
             )
 
+        # weight_decay=None means "don't pass the kwarg", preserving each
+        # optimizer's own default (Adam 0.0, AdamW 0.01, ...). An explicit
+        # value — including 0.0 — is always forwarded.
+        _opt_kwargs = {"lr": self.learning_rate}
+        if self.weight_decay is not None:
+            _opt_kwargs["weight_decay"] = self.weight_decay
         optimizer = getattr(optim, self.optimizer_name)(
-            self.parameters(), lr=self.learning_rate
+            self.parameters(), **_opt_kwargs
         )
 
         if self.lr_scheduler_config is not None:
@@ -237,9 +245,12 @@ class _NBeatsBase(pl.LightningModule):
         loss = loss + self.kl_weight * kl_loss
 
         self.log("train_loss", loss, prog_bar=True)
-        lr = self.trainer.optimizers[0].param_groups[0]["lr"]
-        self.log("lr", lr, prog_bar=False)
-        self.log("lr_1e3", lr * 1000, prog_bar=True)
+        # LR logging requires an attached Trainer; skip when the step is
+        # invoked directly (e.g. in unit tests).
+        if getattr(self, "_trainer", None) is not None and self.trainer.optimizers:
+            lr = self.trainer.optimizers[0].param_groups[0]["lr"]
+            self.log("lr", lr, prog_bar=False)
+            self.log("lr_1e3", lr * 1000, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -289,6 +300,7 @@ class NBeatsNet(_NBeatsBase):
         share_weights: bool = False,
         thetas_dim: int = 5,
         learning_rate: float = 1e-3,
+        weight_decay: float = None,
         loss: str = "SMAPELoss",
         no_val: bool = False,
         optimizer_name: str = "Adam",  # 'Adam', 'SGD', 'RMSprop', 'Adagrad', 'Adadelta', 'AdamW'
@@ -297,6 +309,7 @@ class NBeatsNet(_NBeatsBase):
         active_g=False,
         latent_dim: int = 5,
         latent_gate_fn: str = "sigmoid",
+        ae_intermediate_width: int = None,
         sum_losses: bool = False,
         kl_weight: float = 0.001,
         basis_dim: int = 32,
@@ -367,6 +380,11 @@ class NBeatsNet(_NBeatsBase):
             Trend blocks.
         learning_rate : float, optional
             The learning rate for the optimizer, by default 1e-5.
+        weight_decay : float, optional
+            L2 weight-decay coefficient passed to the optimizer constructor.
+            Default None: the kwarg is not passed at all, so each optimizer
+            keeps its own default (Adam 0.0 — paper-faithful — AdamW 0.01).
+            An explicit value, including 0.0, is always forwarded.
         loss : str, optional
             The loss function to use, defined in LOSSES.
         no_val : bool, optional
@@ -397,6 +415,10 @@ class NBeatsNet(_NBeatsBase):
         latent_gate_fn : str, optional
             Latent gate function for AELG blocks. One of ``'sigmoid'``,
             ``'wavy_sigmoid'``, or ``'wavelet_sigmoid'``. Default ``'sigmoid'``.
+        ae_intermediate_width : int, optional
+            Width of the intermediate (taper) layers in AE-backboned blocks
+            (encoder units -> ae_intermediate_width -> latent_dim, decoder
+            mirrored). Default None (uses units // 2, the historical shape).
         basis_dim : int, optional
             The dimensionality of the basis space in the Wavelet blocks. Default 32.
         basis_offset : int, optional
@@ -496,6 +518,7 @@ class NBeatsNet(_NBeatsBase):
             no_val=no_val,
             optimizer_name=optimizer_name,
             learning_rate=learning_rate,
+            weight_decay=weight_decay,
             sum_losses=sum_losses,
             kl_weight=kl_weight,
             lr_scheduler_config=lr_scheduler_config,
@@ -514,6 +537,7 @@ class NBeatsNet(_NBeatsBase):
         self.active_g = active_g
         self.latent_dim = latent_dim
         self.latent_gate_fn = latent_gate_fn
+        self.ae_intermediate_width = ae_intermediate_width
         self.basis_dim = basis_dim
         self.basis_offset = basis_offset
         self.stack_basis_offsets = stack_basis_offsets
@@ -581,6 +605,15 @@ class NBeatsNet(_NBeatsBase):
             effective_basis_dim = self.stack_basis_dims[stack_idx]
         else:
             effective_basis_dim = self.basis_dim
+
+        # AE-backbone taper width. Forwarded only when explicitly set so the
+        # family-named compatibility wrappers (fixed signatures) are untouched
+        # and default behavior (units // 2) is preserved exactly.
+        _ae_iw_kwargs = (
+            {}
+            if self.ae_intermediate_width is None
+            else {"ae_intermediate_width": self.ae_intermediate_width}
+        )
 
         for block_id in range(self.n_blocks_per_stack):
             if self.share_weights and block_id != 0:
@@ -720,6 +753,7 @@ class NBeatsNet(_NBeatsBase):
                     )
                     if "AELG" in stack_type:
                         block_kwargs["latent_gate_fn"] = self.latent_gate_fn
+                    block_kwargs.update(_ae_iw_kwargs)
                     block = getattr(b, stack_type)(
                         units,
                         self.backcast_length,
@@ -747,6 +781,7 @@ class NBeatsNet(_NBeatsBase):
                     )
                     if "AELG" in stack_type:
                         block_kwargs["latent_gate_fn"] = self.latent_gate_fn
+                    block_kwargs.update(_ae_iw_kwargs)
                     block = getattr(b, stack_type)(
                         units,
                         self.backcast_length,
@@ -765,9 +800,11 @@ class NBeatsNet(_NBeatsBase):
                         self.latent_dim,
                     ]
                     if "AELG" in stack_type:
-                        block = getattr(b, stack_type)(*block_args, self.latent_gate_fn)
+                        block = getattr(b, stack_type)(
+                            *block_args, self.latent_gate_fn, **_ae_iw_kwargs
+                        )
                     else:
-                        block = getattr(b, stack_type)(*block_args)
+                        block = getattr(b, stack_type)(*block_args, **_ae_iw_kwargs)
                 elif "Wavelet" in stack_type:
                     # Only generic base classes accept wavelet_type/backcast/forecast overrides;
                     # family-named subclasses (e.g. HaarWaveletV3) hardcode their wavelet family.
@@ -782,6 +819,9 @@ class NBeatsNet(_NBeatsBase):
                             # Diagnostic probe for the completeness argument;
                             # only the plain WaveletV3 base class accepts it.
                             _wavelet_kwargs["theta_activation"] = self.theta_activation
+                        else:
+                            # AE-backed generic wavelet classes take the taper width.
+                            _wavelet_kwargs.update(_ae_iw_kwargs)
                     if any(token in stack_type for token in ("V3VAE", "V3AE")):
                         if "AELG" in stack_type:
                             _wavelet_kwargs["latent_gate_fn"] = self.latent_gate_fn
@@ -983,6 +1023,7 @@ class NHiTSNet(_NBeatsBase):
         share_weights: bool = False,
         thetas_dim: int = 5,
         learning_rate: float = 1e-3,
+        weight_decay: float = None,
         loss: str = "SMAPELoss",
         no_val: bool = False,
         optimizer_name: str = "Adam",
@@ -991,6 +1032,7 @@ class NHiTSNet(_NBeatsBase):
         active_g=False,
         latent_dim: int = 5,
         latent_gate_fn: str = "sigmoid",
+        ae_intermediate_width: int = None,
         sum_losses: bool = False,
         kl_weight: float = 0.001,
         basis_dim: int = 32,
@@ -1073,6 +1115,7 @@ class NHiTSNet(_NBeatsBase):
             no_val=no_val,
             optimizer_name=optimizer_name,
             learning_rate=learning_rate,
+            weight_decay=weight_decay,
             sum_losses=sum_losses,
             kl_weight=kl_weight,
             lr_scheduler_config=lr_scheduler_config,
@@ -1096,6 +1139,7 @@ class NHiTSNet(_NBeatsBase):
         self.active_g = active_g
         self.latent_dim = latent_dim
         self.latent_gate_fn = latent_gate_fn
+        self.ae_intermediate_width = ae_intermediate_width
         self.basis_dim = basis_dim
         self.basis_offset = basis_offset
         self.stack_basis_offsets = stack_basis_offsets
@@ -1207,6 +1251,15 @@ class NHiTSNet(_NBeatsBase):
             "AutoEncoderVAE",
             "TrendVAE",
             "GenericAEBackcastVAE",
+        )
+
+        # AE-backbone taper width. Forwarded only when explicitly set so the
+        # family-named compatibility wrappers (fixed signatures) are untouched
+        # and default behavior (units // 2) is preserved exactly.
+        _ae_iw_kwargs = (
+            {}
+            if self.ae_intermediate_width is None
+            else {"ae_intermediate_width": self.ae_intermediate_width}
         )
 
         for block_id in range(self.n_blocks_per_stack):
@@ -1328,6 +1381,7 @@ class NHiTSNet(_NBeatsBase):
                     )
                     if "AELG" in stack_type:
                         block_kwargs["latent_gate_fn"] = self.latent_gate_fn
+                    block_kwargs.update(_ae_iw_kwargs)
                     block = getattr(b, stack_type)(
                         units,
                         effective_backcast_length,
@@ -1355,6 +1409,7 @@ class NHiTSNet(_NBeatsBase):
                     )
                     if "AELG" in stack_type:
                         block_kwargs["latent_gate_fn"] = self.latent_gate_fn
+                    block_kwargs.update(_ae_iw_kwargs)
                     block = getattr(b, stack_type)(
                         units,
                         effective_backcast_length,
@@ -1373,9 +1428,11 @@ class NHiTSNet(_NBeatsBase):
                         self.latent_dim,
                     ]
                     if "AELG" in stack_type:
-                        block = getattr(b, stack_type)(*block_args, self.latent_gate_fn)
+                        block = getattr(b, stack_type)(
+                            *block_args, self.latent_gate_fn, **_ae_iw_kwargs
+                        )
                     else:
-                        block = getattr(b, stack_type)(*block_args)
+                        block = getattr(b, stack_type)(*block_args, **_ae_iw_kwargs)
                 elif "Wavelet" in stack_type:
                     _wavelet_kwargs = {}
                     if stack_type in _GENERIC_WAVELET_V3:
@@ -1388,6 +1445,9 @@ class NHiTSNet(_NBeatsBase):
                             # Diagnostic probe for the completeness argument;
                             # only the plain WaveletV3 base class accepts it.
                             _wavelet_kwargs["theta_activation"] = self.theta_activation
+                        else:
+                            # AE-backed generic wavelet classes take the taper width.
+                            _wavelet_kwargs.update(_ae_iw_kwargs)
                     if any(token in stack_type for token in ("V3VAE", "V3AE")):
                         if "AELG" in stack_type:
                             _wavelet_kwargs["latent_gate_fn"] = self.latent_gate_fn
@@ -1611,6 +1671,7 @@ class DWTPreprocessNBeats(_NBeatsBase):
         no_val: bool = False,
         optimizer_name: str = "Adam",
         learning_rate: float = 1e-3,
+        weight_decay: float = None,
         sum_losses: bool = False,
         kl_weight: float = 0.001,
         lr_scheduler_config: dict = None,
@@ -1622,6 +1683,7 @@ class DWTPreprocessNBeats(_NBeatsBase):
             no_val=no_val,
             optimizer_name=optimizer_name,
             learning_rate=learning_rate,
+            weight_decay=weight_decay,
             sum_losses=sum_losses,
             kl_weight=kl_weight,
             lr_scheduler_config=lr_scheduler_config,

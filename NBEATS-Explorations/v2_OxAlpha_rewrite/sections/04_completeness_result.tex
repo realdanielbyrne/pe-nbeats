@@ -1,0 +1,148 @@
+% ===========================================================================
+% Section 4: the completeness result.
+% Sources: paper_rewrite_plan.md §2 thesis item 2, §6 subplan "§3 Why Basis
+% Identity Cannot Matter -- and Where It Does", Part II §20 (evidence
+% inventory rows "Basis identity at complete rank" and "Nonlinearity
+% placement"); rebuttal responses response_K8yb.md (i), response_CAcc.md §2,
+% response_ovPT.md Q4, response_y8d1.md W2, response_AC.md opening + Point 4.
+%
+% Statistics quoted exactly: rotation-absorption residual 5.6e-15; 36 paired
+% comparisons, none significant, minimum p = 0.084; boundary test KW
+% p = 6.4e-05 (fully linear), p = 0.457 (after basis), p = 1.9e-07
+% (interposed). The four scope conditions restate the enumerate of
+% Sec.~method_heads verbatim in substance.
+% ===========================================================================
+
+\section{Basis Completeness: Why Basis Identity Cannot Matter}
+\label{sec:completeness}
+
+The trunk result removes width from the story; this section removes the
+basis identity from it, at complete forecast rank. What remains when both
+are removed --- rank and captured energy --- is the subject of
+Section~\ref{sec:predictors}.
+
+\subsection{The rotation-absorption argument}
+\label{sec:completeness:proof}
+
+The argument is a two-line consequence of the formulation
+\eqref{eq:formulation}. Suppose $d_f = H$, the paper's non-tiered
+default. Then $\mathbf{B}_f \in \mathbb{R}^{H \times H}$ is square and
+orthogonal, and for any unconstrained synthesis head
+$\mathbf{M} \in \mathbb{R}^{H \times U}$ there exists a learned projection
+$\mathbf{W}_f = \mathbf{B}_f \mathbf{M}$ such that
+$\mathbf{B}_f^{\top} \mathbf{W}_f = \mathbf{B}_f^{\top}
+\mathbf{B}_f \mathbf{M} = \mathbf{M}$ exactly. A block with a complete
+frozen forecast basis therefore represents precisely what standard N-BEATS
+with an unconstrained head represents, in rotated coordinates: the freely
+learned projection absorbs the rotation between any two complete
+orthonormal bases, and on the forecast path basis identity cannot change
+what a block can synthesize. We verified this numerically at residual
+$5.6\times10^{-15}$.
+
+Three null results that the submitted version reported without explaining
+follow immediately: the family null, the filter-length null, and blocks
+being interchangeable at equal rank. The limiting case is instructive and,
+as Section~\ref{sec:method_basis} discloses, was actually shipped: below
+its minimum filter length a wavelet generator returns the identity matrix,
+the degenerate basis for which the absorption holds literally.
+
+\subsection{Scope conditions}
+\label{sec:completeness:scope}
+
+Four scope conditions keep the claim honest; they are stated with the
+formulation in Section~\ref{sec:method_heads} and every downstream use in
+this paper respects them.
+\begin{enumerate}
+\item \textbf{Expressiveness, not trainability.} The guarantee fixes what
+the forecast head can represent, not what training finds; a complete
+basis whose coefficient spectrum is degenerate can fail to train on every
+seed (Section~\ref{sec:predictors}).
+\item \textbf{Trend-branch-present null.} Every arm of the identity
+comparison grid carried the paired polynomial trend branch, which absorbs
+the dominant component that otherwise breaks coefficient conditioning;
+the measured null below is a trend-branch-present result.
+\item \textbf{Forecast head only.} Every shipped backcast basis is
+truncated ($d_b = H$ or $2H$ rows against a backcast of three to five
+horizons), and truncated bases from different generators span different
+subspaces that no rotation relates; on the backcast path family
+equivalence rests on measurement, not proof.
+\item \textbf{Tiered configurations excluded.} Tiered offset schedules
+truncate the forecast basis itself and belong to the truncated regime of
+Section~\ref{sec:predictors}, where measurement carries whatever
+equivalence holds.
+\end{enumerate}
+\subsection{The measurement}
+\label{sec:completeness:measurement}
+
+The proposition is testable, and it was tested against the comparison a
+reviewer named directly: Daubechies-3 \citep{daubechies1992ten} against a
+frozen DCT and two random orthonormal draws, at equal rank, with
+architecture, data, protocol, seeds, and parameter counts identical ---
+byte-identical counts --- across all six M4 periods at ten seeds. The
+result is 36 paired comparisons with none significant; the smallest raw
+$p$ is 0.084. By construction every arm carried the paired trend branch,
+so by scope condition~2 this is a trend-branch-present result. By the
+reviewer's own criterion the contribution of the submitted version is
+frozen low-rank projection rather than wavelets.
+
+One disclosure sharpens rather than weakens the result. Because several
+historical ``wavelet'' configurations silently received the identity basis
+on their forecast path (coif2 and sym10 on five of six M4 periods,
+Daubechies-3 on Yearly and Quarterly; only haar and db2 were genuine
+throughout), not one of the six per-period M4 leaders carries a genuine
+wavelet on its forecast path. The accuracy stands and the labels do not.
+This weakens the family null as evidence about wavelets and strengthens
+the proposition: the identity is its limiting case, and those cells score
+exactly where the genuine wavelets beside them score. Accordingly the
+family-equivalence analysis is restated over the families genuinely
+distinct on each period (Hourly: all five genuine; Yearly and Quarterly:
+\{haar, db2, identity\}; Weekly, Daily, Monthly: \{haar, db2, db3,
+identity\}), every affected table cell carries the $\ddagger$ marker of
+the unified legend scoped to exactly those (family, horizon) combinations,
+and no sentence attributes an effect to a named family on an
+identity-marked cell. The full disclosure is carried in
+Table~\ref{tab:corrections_ledger}.
+
+\subsection{Boundary test: where the premise is needed}
+\label{sec:completeness:boundary}
+
+The argument's premise is that nothing nonlinear sits between the learned
+projection and the frozen basis. A 240-run placement study localizes
+exactly where it is needed. With fully linear synthesis the Kruskal--Wallis
+test rejects at $p = 6.4\times10^{-5}$, but the entire spread is the DCT
+conditioning pathology of Section~\ref{sec:predictors} --- a trainability
+failure, not an expressiveness difference. Placing the nonlinearity after
+the basis restores the null ($p = 0.457$, spread 0.133). Interposing it
+between projection and basis breaks the equivalence violently
+($p = 1.9\times10^{-7}$, spread 40.487). The guarantee holds precisely
+when its hypothesis does.
+
+\subsection{Why the wavelet premise was misconceived}
+\label{sec:completeness:misconceived}
+
+Which property of compactly supported orthogonal dyadic wavelets
+\citep{mallat1989wavelet} does this architecture exploit? None, and the
+reason is a mismatch of approximation setting. The classical superiority
+of wavelets is a theorem about nonlinear best-$m$-term approximation, in
+which the retained coefficients are chosen per signal. Here the rows are
+fixed at build time and shared across every series: linear approximation,
+where the optimal fixed subspace is the Karhunen--Lo\`eve basis and where
+localisation --- the property wavelets are chosen for --- becomes a
+liability, because each retained translate covers only part of the time
+axis. This answers the positioning question for short-time Fourier
+transforms, wavelet packets, stationary transforms, and overcomplete
+dictionaries in one stroke: the time-frequency versus time-scale axis is
+the wrong axis for this architecture, and what governs the outcome is how
+much target energy lies in the span of the retained rows, whatever
+produced them (Section~\ref{sec:predictors}).
+
+One corrected claim belongs to this paragraph as history. After
+submission we claimed that a band-ordered wavelet finishes behind random
+orthonormal draws; the claim was an artifact of our own
+singular-value-decomposition orthogonalization, whose energy-descending
+row ordering destroyed the dyadic structure. Rebuilt so that the band
+ordering survives, the wavelet lands within 0.30 sMAPE of the DCT at
+matched rank, and the corrected ordering lifts captured energy from 0.348
+to 0.9999. The withdrawal is carried in
+Table~\ref{tab:corrections_ledger}.
+

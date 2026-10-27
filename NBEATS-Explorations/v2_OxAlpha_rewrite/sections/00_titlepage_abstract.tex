@@ -1,0 +1,56 @@
+% =========================================================================
+% Title page fragment for "Frozen Basis Time Series Forecasting"
+% (camera-ready rewrite of NeurIPS submission 30981).
+%
+% Chosen title (Part II §15, bare form -- the current choice):
+%
+%   Frozen Basis Time Series Forecasting
+%
+% DECISION GATE (plan §15 / §13): bare title vs.\ finding-stating subtitle.
+% BOTH options are left below so the assembler can decide explicitly;
+% the bare form is the plan's current choice.
+%
+% Option A (bare, current choice):
+%   \title{Frozen Basis Time Series Forecasting}
+%
+% Option B (finding-stating; defensible on the trunk-width sweep alone):
+%   \title{Frozen Basis Time Series Forecasting: N-BEATS Needs a Fiftieth
+%          of Its Trunk}
+%
+% Abstract held to the 320-word budget of Part II §15; every number below
+% is a controlled comparison that also appears in the body sections.
+% =========================================================================
+
+\begin{abstract}
+N-BEATS reaches its M4 accuracy with twenty to forty five million parameters,
+a capacity never questioned. Which parts of a basis expansion block carry the
+accuracy, and which are inert? I factor each block's unconstrained synthesis
+head through a frozen orthonormal basis, leaving two integers, the backcast
+and forecast ranks, plus one trunk choice, varying each at matched budgets.
+
+The parameters are in the trunk and are not needed: narrowing it from
+2048 units to 128 cuts the count 48.8 fold, $64{,}645{,}150$ to
+$1{,}323{,}550$, for 0.098 sMAPE at $p = 0.78$. The compression credited to
+the wavelet basis is the trunk, one integer in the original architecture.
+Basis identity cannot matter at the rank every reported configuration uses,
+where the basis is square and orthogonal and the projection feeding it
+absorbs any rotation exactly; thirty six paired comparisons over wavelet,
+cosine and random bases are null, minimum $p = 0.084$. Below full rank it
+matters greatly, and captured energy, the share of target energy the
+retained rows span, reproduces the trained ordering without inversion on two
+datasets, rank correlation $-1.0$ on Traffic-96. Trainability is a separate
+axis: effective rank tracks convergence at $\rho = +0.949$, bases
+concentrating their energy in one direction fail on every seed, and
+rectifying the output or pairing a trend branch restores full convergence
+without adding expressive power. Instability is negative forecasts on
+positive series, which sMAPE scores at its 200 ceiling regardless of
+magnitude; deleting those points recovers the converged score to within
+0.11, and rectification cuts collapses from 107 of 23,786 runs to 0 of 136.
+Out of sample on Tourism the compact configuration matches or beats both
+paper baselines at 14 to 15 times fewer parameters, and never collapses in
+240 runs.
+
+The gain is position on the accuracy against size frontier, not accuracy:
+two significant losses on M4 and an outright loss on Traffic-96, 29.37 sMAPE
+at 1.81M against 26.24 at 52.3M.
+\end{abstract}

@@ -95,6 +95,7 @@ DEFAULT_TRAINING = {
     "loss": LOSS,
     "optimizer": "Adam",  # Adam | SGD | RMSprop | Adagrad | Adadelta | AdamW
     "learning_rate": LEARNING_RATE,
+    "weight_decay": None,  # None → optimizer's own default (Adam 0.0, paper-faithful)
     "max_epochs": MAX_EPOCHS,
     "patience": EARLY_STOPPING_PATIENCE,
     "n_blocks_per_stack": 1,
@@ -129,6 +130,7 @@ DEFAULT_BLOCK_PARAMS = {
     "thetas_dim": THETAS_DIM,
     "latent_dim": LATENT_DIM,
     "latent_gate_fn": "sigmoid",
+    "ae_intermediate_width": None,  # None → units // 2 (historical AE taper shape)
     "basis_dim": BASIS_DIM,
     "forecast_basis_dim": None,
     "trend_thetas_dim": None,
@@ -973,6 +975,11 @@ def run_single_config(
         thetas_dim_override=block_params.get("thetas_dim"),
         latent_dim_override=block_params.get("latent_dim"),
         latent_gate_fn=block_params.get("latent_gate_fn", "sigmoid"),
+        ae_intermediate_width=(
+            None
+            if block_params.get("ae_intermediate_width") is None
+            else int(block_params["ae_intermediate_width"])
+        ),
         trend_thetas_dim=block_params.get("trend_thetas_dim"),
         wavelet_type=block_params.get("wavelet_type") or "db3",
         backcast_wavelet_type=block_params.get("backcast_wavelet_type"),
@@ -980,6 +987,11 @@ def run_single_config(
         lr_scheduler_config=lr_scheduler_cfg,
         optimizer_name=training.get("optimizer", "Adam"),
         learning_rate=training.get("learning_rate"),
+        weight_decay=(
+            None
+            if training.get("weight_decay") is None
+            else float(training["weight_decay"])
+        ),
         loss_override=training.get("loss"),
         normalize=bool(protocol.get("normalize", False)),
         val_ratio=protocol.get("val_ratio"),

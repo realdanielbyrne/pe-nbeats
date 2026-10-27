@@ -1,0 +1,219 @@
+# ============================================================
+# Traffic-96 trunk-width study, v2 — the corrected rerun.
+#
+# PROVENANCE. v2 of the abandoned traffic96_trunk_width.yaml; the v1 CSV must
+# not be cited. The first attempt (paper_rewrite_plan.md Part II §22) carried
+# three faults against the reference sweep it was meant to be read next to
+# (comprehensive_sweep_traffic.yaml): a missing learning-rate schedule,
+# patience 10 instead of 20, and share_weights false. Result: seed standard
+# deviation 5.43 against the reference sweep's 0.50 — wide enough to swallow
+# the effect being measured, roughly 10x underpowered. Its 5 completed runs
+# must not be cited, by anyone. This file keeps v1's seven arms and design
+# and substitutes the reference sweep's training protocol wholesale:
+#
+#   max_epochs 200 (was 100), patience 20 (was 10), share_weights true
+#   (was false), MSELoss (was SMAPELoss), batch_size 131072 (was 1024),
+#   cosine-warmup LR schedule warmup_epochs=15 / eta_min=1e-6 (was none),
+#   Adam lr 0.001, forecast_multiplier 5, n_blocks_per_stack 1,
+#   active_g false, sum_losses false — the last five unchanged from v1.
+#
+# PROTOCOL BLOCK. Both v1 and comprehensive_sweep_traffic.yaml specify the
+# identical dataset-loading protocol (normalize false, train_ratio 0.7,
+# val_ratio 0.1, include_target true), so there was nothing to choose between:
+# the block below is simultaneously "v1's protocol kept" and "the reference
+# sweep's protocol adopted". num_workers stays 0 per project rule (the
+# reference sweep's num_workers 5 is NOT carried over; it does not help here).
+#
+# SEEDS. n_runs 5, seed_mode sequential, base_seed 42 — matched seeds across
+# arms, because this is a paired within-seed comparison (each seed sees all
+# seven arms). The reference sweep used random seeds; pairing requires
+# sequential, so v2 keeps v1's seed design rather than the reference's.
+#
+# ── READ BEFORE COMPARING TO OLD TRAFFIC NUMBERS ─────────────────────────────
+# Commit 41888b4 (2026-04-13) changed the Traffic test set from a single
+# horizon-length block (ONE prediction row per series) to the final 20% of
+# rows (~3,415 rolling windows per series). Every pre-41888b4 Traffic CSV —
+# including comprehensive_sweep_traffic_results.csv, the source of the 25.033
+# / 26.244 / 27.147 sMAPE figures quoted in the predictions below — is NOT
+# comparable in absolute terms to anything run today: the test set is
+# different. Read this study through its own within-run contrasts (TW vs
+# NBEATS-G at matched width, width ladders within each family), not against
+# old-corpus absolute numbers.
+#
+# ── ORIGINAL DESIGN RATIONALE (carried from v1) ──────────────────────────────
+# Is the Traffic-96 deficit a basis problem or a trunk problem?
+#
+# THE SITUATION. Traffic-96 is the one dataset where the paper baselines beat
+# the frozen basis arms outright, and the margin is large: NBEATS-G_30s_agf at
+# 25.033 or NBEATS-IG_30s_ag0 at 26.244 against the best frozen basis arm,
+# TW_10s_td3_bd2eq_sym10, at 27.147. A gap of 1.1 to 3.1 sMAPE depending which
+# arms are compared. The paper concedes this and reframes as a frontier claim.
+#
+# WHAT NOBODY CHECKED. The two families were never run at the same trunk width.
+# TrendWavelet blocks default to t_width=256; Generic blocks default to 512.
+# At 10 stacks on Traffic-96 with L=480:
+#
+#     NBEATS-G   g_width=512   13,291,520      <- the baseline that wins
+#     TW         t_width=256    3,960,700      <- the arm that loses
+#     TW         t_width=512   11,850,620      <- NEVER RUN, 11 percent apart
+#
+# So the reported deficit is measured against a baseline carrying twice the
+# trunk width, and the matched cell does not exist. This is the identical
+# confound found on M4, where correcting it showed trunk width to be inert
+# across a 48.8 fold parameter range.
+#
+# WHY TRAFFIC MIGHT GO THE OTHER WAY, and why that matters more than winning.
+# On M4 the trunk was inert, so narrowing it was free. Traffic's target energy
+# is spread over far more directions than M4's: effective rank of the target
+# coefficient distribution runs 2.54 to 58.22 across bases on Traffic against
+# 1.05 to 17.86 on M4-Hourly, and Traffic's leading eigenvector holds 0.61 of
+# the energy against 0.98 for M4-Hourly. A signal spread over more directions
+# plausibly needs more capacity to synthesise, so Traffic is exactly where the
+# inertness should break.
+#
+# If it does break, that is a better result than closing the gap. It gives the
+# paper the boundary of its own central claim, stated quantitatively and
+# measurable before training: compression is safe when the target's energy is
+# concentrated, and Traffic is the case where it is not.
+#
+# WHAT THIS IS NOT. It is not a search for a configuration that wins. Depth has
+# already been tested and does not help: tripling from 10 to 30 stacks moves the
+# frozen basis arms by +0.02, +0.18, -0.12, +0.44 and +0.97 sMAPE, mostly worse,
+# while the Generic baseline gains 0.65 from the same change (p = 0.014). Adding
+# stacks widens the gap rather than closing it. Basis identity cannot help
+# either: the forecast basis is already complete in these arms, so a rotation is
+# absorbed by the learned projection and no choice of matrix changes what is
+# representable. Trunk width is the one axis left untested.
+#
+# PREDICTIONS, REGISTERED BEFORE THE RUNS.
+#   1. Traffic trunk width is NOT inert, unlike M4. Widening TW from 256 to 512
+#      improves sMAPE by more than 0.5.
+#   2. At matched width the gap to the baseline falls below 1.0 sMAPE, from the
+#      2.1 measured at mismatched widths.
+#   3. The Generic baseline also degrades when narrowed to 256 and 128, so the
+#      effect is capacity rather than architecture, and both families move
+#      together.
+#   4. The width curve on Traffic is monotone over the range tested, where the
+#      M4 curve was flat across 48.8 fold.
+#
+# FALSIFIED IF: TW at 512 does not improve on TW at 256. Then Traffic trunk
+# width is inert too, the deficit is genuinely architectural, and the paper must
+# report that the method loses on Traffic for a reason it cannot repair.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/traffic96_trunk_width_v2.yaml --dry-run
+#   python experiments/run_from_yaml.py experiments/configs/traffic96_trunk_width_v2.yaml
+# ============================================================
+
+experiment_name: traffic96_trunk_width_v2
+category: attribution
+description: >
+  Corrected rerun of the abandoned Traffic-96 trunk-width study. Sweeps trunk
+  width in both families (TrendWavelet 128/256/512/1024, NBEATS-G 128/256/512)
+  at the same depth and seeds, under the comprehensive_sweep_traffic.yaml
+  training protocol (cosine-warmup LR, patience 20, share_weights true,
+  MSELoss, batch_size 131072). v1's CSV must not be cited.
+
+dataset: traffic
+periods:
+  - Traffic-96
+
+# Identical in v1 and comprehensive_sweep_traffic.yaml (see header).
+protocol:
+  normalize: false
+  train_ratio: 0.7
+  val_ratio: 0.1
+  include_target: true
+
+# Reference sweep protocol, substituted wholesale (all three v1 faults fixed).
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_epochs: 200               # v1 fault context: v1 ran 100
+  patience: 20                  # v1 FAULT 2 fixed: was 10
+  n_blocks_per_stack: 1
+  share_weights: true           # v1 FAULT 3 fixed: was false
+  loss: MSELoss                 # reference sweep loss; v1 used SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5        # L = 480 = 5H, the regime that does not collapse
+  batch_size: 131072            # reference sweep batch; ran on this machine's
+                                # RTX 5090s for the 13.3M-param NBEATS-G arm
+
+# v1 FAULT 1 fixed: v1 had no schedule. type defaults to cosine (warmup).
+lr_scheduler:
+  warmup_epochs: 15
+  eta_min: 0.000001
+
+block_params:
+  trend_thetas_dim: 3
+  basis_dim: 2*eq_fcast         # the better of the two measured backcast ranks
+  wavelet_type: sym10           # the best frozen basis arm on Traffic
+
+runs:
+  n_runs: 5
+  seed_mode: sequential         # paired within-seed comparison across arms;
+  base_seed: 42                 # reference sweep used random seeds, but
+                                # pairing requires matched sequential seeds
+
+extra_csv_columns:
+  - family
+  - trunk_width
+
+configs:
+  # ---- frozen basis, trunk swept including the never run matched cell ----
+  - name: TW_10s_w128
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {t_width: 128}
+    extra_fields: {family: frozen_basis, trunk_width: 128}
+
+  - name: TW_10s_w256
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {t_width: 256}
+    extra_fields: {family: frozen_basis, trunk_width: 256}
+
+  - name: TW_10s_w512
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {t_width: 512}
+    extra_fields: {family: frozen_basis, trunk_width: 512}
+
+  - name: TW_10s_w1024
+    stacks: {type: homogeneous, block: TrendWavelet, n: 10}
+    block_params: {t_width: 1024}
+    extra_fields: {family: frozen_basis, trunk_width: 1024}
+
+  # ---- paper baseline, same trunk ladder ----
+  - name: NBEATS-G_10s_w128
+    stacks: {type: homogeneous, block: Generic, n: 10}
+    block_params: {g_width: 128}
+    extra_fields: {family: paper_baseline, trunk_width: 128}
+
+  - name: NBEATS-G_10s_w256
+    stacks: {type: homogeneous, block: Generic, n: 10}
+    block_params: {g_width: 256}
+    extra_fields: {family: paper_baseline, trunk_width: 256}
+
+  - name: NBEATS-G_10s_w512
+    stacks: {type: homogeneous, block: Generic, n: 10}
+    block_params: {g_width: 512}
+    extra_fields: {family: paper_baseline, trunk_width: 512}
+
+output:
+  results_dir: experiments/results
+  csv_filename: traffic96_trunk_width_v2_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0                # project rule; reference sweep's 5 NOT carried
+
+analysis:
+  enabled: true
+  ranking: true

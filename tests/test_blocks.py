@@ -1431,3 +1431,136 @@ class TestOrderedBasisFullRank:
         b = _WaveletGeneratorV3(length, "ordered:haar").basis.double()
         gram = b @ b.T
         assert torch.allclose(gram, torch.eye(length, dtype=torch.float64), atol=1e-8)
+
+
+# --- AE intermediate (taper) width ---
+
+
+class TestAEIntermediateWidth:
+    """Verify ae_intermediate_width overrides the AE backbone taper layers.
+
+    Default (None) must reproduce the historical units // 2 shape exactly;
+    an explicit value must set both encoder and decoder intermediate dims.
+    """
+
+    def test_generic_ae_custom_taper_dims(self):
+        block = b.GenericAE(
+            units=512,
+            backcast_length=BACKCAST_LENGTH,
+            forecast_length=FORECAST_LENGTH,
+            latent_dim=LATENT_DIM,
+            ae_intermediate_width=384,
+        )
+        # encoder: backcast_length -> 384 -> latent_dim
+        assert block.fc1.out_features == 384
+        assert block.fc2.in_features == 384
+        # decoder: latent_dim -> 384 -> units
+        assert block.fc3.out_features == 384
+        assert block.fc4.in_features == 384
+        assert block.fc4.out_features == 512
+
+    def test_generic_ae_custom_taper_forward_shapes(self):
+        block = b.GenericAE(
+            units=512,
+            backcast_length=BACKCAST_LENGTH,
+            forecast_length=FORECAST_LENGTH,
+            latent_dim=LATENT_DIM,
+            ae_intermediate_width=384,
+        )
+        x = torch.randn(4, BACKCAST_LENGTH)
+        backcast, forecast = block(x)
+        assert backcast.shape == (4, BACKCAST_LENGTH)
+        assert forecast.shape == (4, FORECAST_LENGTH)
+
+    def test_trendwavelet_ae_custom_taper(self):
+        block = b.TrendWaveletAE(
+            512,
+            BACKCAST_LENGTH,
+            FORECAST_LENGTH,
+            trend_dim=3,
+            wavelet_dim=BASIS_DIM,
+            latent_dim=LATENT_DIM,
+            ae_intermediate_width=384,
+        )
+        assert block.fc1.out_features == 384
+        assert block.fc4.in_features == 384
+        x = torch.randn(4, BACKCAST_LENGTH)
+        backcast, forecast = block(x)
+        assert backcast.shape == (4, BACKCAST_LENGTH)
+        assert forecast.shape == (4, FORECAST_LENGTH)
+
+    def test_default_none_reproduces_units_half(self):
+        legacy = b.GenericAE(
+            units=512,
+            backcast_length=BACKCAST_LENGTH,
+            forecast_length=FORECAST_LENGTH,
+            latent_dim=LATENT_DIM,
+        )
+        explicit_none = b.GenericAE(
+            units=512,
+            backcast_length=BACKCAST_LENGTH,
+            forecast_length=FORECAST_LENGTH,
+            latent_dim=LATENT_DIM,
+            ae_intermediate_width=None,
+        )
+        assert legacy.fc1.out_features == 512 // 2
+        legacy_sd = legacy.state_dict()
+        none_sd = explicit_none.state_dict()
+        assert list(legacy_sd.keys()) == list(none_sd.keys())
+        for key in legacy_sd:
+            assert legacy_sd[key].shape == none_sd[key].shape, key
+
+    def test_explicit_units_half_matches_default_shapes(self):
+        legacy = b.GenericAE(
+            units=512,
+            backcast_length=BACKCAST_LENGTH,
+            forecast_length=FORECAST_LENGTH,
+            latent_dim=LATENT_DIM,
+        )
+        explicit = b.GenericAE(
+            units=512,
+            backcast_length=BACKCAST_LENGTH,
+            forecast_length=FORECAST_LENGTH,
+            latent_dim=LATENT_DIM,
+            ae_intermediate_width=256,
+        )
+        legacy_sd = legacy.state_dict()
+        explicit_sd = explicit.state_dict()
+        assert list(legacy_sd.keys()) == list(explicit_sd.keys())
+        for key in legacy_sd:
+            assert legacy_sd[key].shape == explicit_sd[key].shape, key
+
+    def test_aelg_backbone_taper(self):
+        block = b.GenericAELG(
+            units=512,
+            backcast_length=BACKCAST_LENGTH,
+            forecast_length=FORECAST_LENGTH,
+            latent_dim=LATENT_DIM,
+            ae_intermediate_width=384,
+        )
+        assert block.fc1.out_features == 384
+        assert block.fc4.in_features == 384
+
+    def test_vae_backbone_taper(self):
+        block = b.GenericVAE(
+            units=512,
+            backcast_length=BACKCAST_LENGTH,
+            forecast_length=FORECAST_LENGTH,
+            latent_dim=LATENT_DIM,
+            ae_intermediate_width=384,
+        )
+        # outer taper 384, inner taper 192
+        assert block.fc1.out_features == 384
+        assert block.fc1b.in_features == 384
+        assert block.fc1b.out_features == 192
+        assert block.fc4.in_features == 384
+
+    def test_vae_default_matches_legacy_quarter_widths(self):
+        block = b.GenericVAE(
+            units=512,
+            backcast_length=BACKCAST_LENGTH,
+            forecast_length=FORECAST_LENGTH,
+            latent_dim=LATENT_DIM,
+        )
+        assert block.fc1.out_features == 512 // 2
+        assert block.fc1b.out_features == 512 // 4

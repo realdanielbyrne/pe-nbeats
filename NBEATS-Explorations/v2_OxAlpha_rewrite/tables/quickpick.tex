@@ -1,0 +1,49 @@
+% =========================================================================
+% tab:quickpick — spec §8 disposition #12: RESTRUCTURE TO §5 SCHEMA; the
+% ttd/ld/bd/ag column headers are replaced by p (caption), d_b, Trunk, and
+% the † marker. Scores verbatim from v1 L628-644; renderings per spec §6b.
+% No family column survives (family left every table; genuine-vs-identity
+% status is carried by the ‡ marker).
+% =========================================================================
+
+\begin{table}[h]
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{3pt}
+  \caption{Best M4 configuration per (period, protocol): the per-period
+  recipe to copy into a run configuration for a new M4 experiment; each
+  row reproduces the per-period top cell of the corresponding leaderboard.
+  All cells are $n=10$ unless noted. Column conventions: all frozen-basis
+  rows have complete forecast rank ($d_f = H$) and trend order $p = 3$;
+  ``---'' means the column does not apply to a baseline variant. Markers:
+  $^{\dag}$\,forecast-head output activation (\texttt{active\_g}), a
+  \texttt{lightningnbeats} extension beyond
+  \citet{oreshkin2020nbeats}, not paper-faithful;
+  $^{\ddag}$\,the frozen basis at this horizon was the identity matrix,
+  so the label ``wavelet'' does not apply to this cell.}
+  \label{tab:quickpick}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{@{}llllllllr@{}}
+    \toprule
+    Period & Protocol & Schedule & Variant & S & Layout & $d_b$ & Trunk & sMAPE \\
+    \midrule
+    Yearly    & paper-sample & plateau       & FB+T$^{\ddag}$        & 30 & alt         & H    & uniform-512 & 13.542 \\
+    Quarterly & paper-sample & plateau       & N-BEATS-I+G           & 10 & ---         & ---  & uniform-512 & 10.313 \\
+    Monthly   & paper-sample & plateau       & FB+T$^{\ddag}$        & 30 & unif        & H    & uniform-512 & 13.240 \\
+    Weekly    & paper-sample & step-paper    & FB+T$^{\ddag}$        & 30 & alt         & H    & uniform-512 & $\phantom{0}6.735$ \\
+    Daily     & paper-sample & plateau       & FB+T$^{\ddag}$        & 10 & alt, tiered & H    & uniform-512 & $\phantom{0}3.012$ \\
+    Hourly    & paper-sample & step-paper    & N-BEATS-I+G$^{\dag}$  & 30 & ---         & ---  & uniform-512 & $\phantom{0}8.758$ \\
+    \midrule
+    Yearly    & sliding      & cosine-warmup & FB+T$^{\ddag}$        & 10 & unif        & H    & uniform-512 & 13.499 \\
+    Quarterly & sliding      & cosine-warmup & N-BEATS-I+G           & 10 & ---         & ---  & uniform-512 & 10.127 \\
+    Monthly   & sliding      & cosine-warmup & FB+T$^{\ddag}$        & 30 & unif        & 2H   & uniform-512 & 13.279 \\
+    Weekly    & sliding      & cosine-warmup & FB+T                  & 30 & alt         & H    & uniform-512 & $\phantom{0}6.671$ \\
+    Daily     & sliding      & cosine-warmup & N-BEATS-G             & 30 & ---         & ---  & uniform-512 & $\phantom{0}2.588$ \\
+    Hourly    & sliding      & cosine-warmup & N-BEATS-I+G$^{\dag}$  & 30 & ---         & ---  & uniform-512 & $\phantom{0}8.587$ \\
+    \midrule
+    \multicolumn{9}{l}{\textit{Sub-1M parameter champions (paper-sample):}} \\
+    Yearly    & paper-sample & plateau       & FB+T                  & 10 & unif        & H    & AE-32       & 13.546 \\
+    Daily     & paper-sample & plateau       & FB+T+G$^{\mathrm{g}}$ & 10 & unif        & H    & AE-16       & $\phantom{0}3.051$ \\
+    \bottomrule
+  \end{tabular}}
+\end{table}

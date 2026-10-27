@@ -1,0 +1,185 @@
+# ============================================================
+# The AE row of the {Fourier, wavelet} x {RootBlock, AE} crossing at ~1M params
+#
+# THE QUESTION. The trunk-width attribution study (m4_trunk_width_attribution.yaml)
+# ran the RootBlock row of a 2x2 crossing: {learned Fourier pair, frozen
+# orthonormal DWT} x {RootBlock trunk, AE trunk}. It found the compression story
+# lives in the trunk, not the basis, and that both families are matched at every
+# rung of the RootBlock trunk. Reviewer y8d1 (Q2) pointed out that the
+# autoencoder row of that crossing was never run at the ~1M parameter budget
+# where the paper's compression claims live: every AE number in the paper sits
+# on a different backbone at a different scale. This config is the committed
+# revision experiment ("The autoencoder row is not run at that budget. The full
+# crossing goes in the revision"): the exact mirror of the RootBlock row with
+# the 4-FC trunk swapped for the encoder-decoder AE trunk
+# (backcast -> units/2 -> latent_dim=32 -> units/2 -> units), everything else
+# pinned.
+#
+# DESIGN. Alternating [Trend, SeasonalityAE] vs [Trend, WaveletV3AE], repeats 5
+# (10 stacks), one block per stack, no weight sharing. The Trend branch is the
+# SAME plain RootBlock Trend as the template (t_width=256, trend_thetas_dim=3)
+# so only the second block's trunk and basis vary. Wavelet family is haar and
+# ONLY haar: at M4 horizons H=6 (Yearly) and H=18 (Monthly) the long-support
+# families (db3, coif2, sym10) silently degenerate to identity forecast bases,
+# which would make the "wavelet" arm a disguised Generic head; haar is verified
+# non-identity at both horizons (dwt_max_level = 2 and 4).
+#
+# PARAMETER COUNTS, measured by instantiating NBeatsNet before any run
+# (latent_dim=32, basis_dim=eq_fcast, trend branch included):
+#
+#   Yearly  (L=30, H=6)          Monthly (L=90, H=18)
+#   w=512  T+SAE 1,902,270  T+WavAE 1,845,950  (-3.0%) | 2,240,190 / 2,060,990  (-8.0%)
+#   w=256  T+SAE 1,304,510  T+WavAE 1,276,350  (-2.2%) | 1,511,870 / 1,422,270  (-5.9%)
+#   w=128  T+SAE 1,128,510  T+WavAE 1,114,430  (-1.3%) | 1,270,590 / 1,225,790  (-3.5%)
+#
+# The w=256 and w=128 rungs land squarely in the 1.0-1.5M band on Yearly,
+# bracketing the RootBlock row's width-128 rung (1,323,550 on Yearly), and the
+# two families sit within ~2-3% of each other there. latent_dim=32 is kept: it
+# does not make the arms diverge (ld=16 changes the gap by <0.1 point), and 32
+# matches the sub-1M champion TWAE_10s_ld32 lineage. The residual Monthly gap
+# at w=512 (-8%) is a head-width artifact — the Fourier backcast head is 89
+# thetas wide at L=90 while eq_fcast caps the wavelet backcast head at 18 —
+# and favors the Fourier arm in parameters, so a wavelet win there cannot be
+# a budget artifact.
+#
+# PREDICTIONS, REGISTERED BEFORE THE RUNS.
+#   1. The family null survives the AE trunk: at every matched rung (512, 256,
+#      128), SeasonalityAE and WaveletV3AE(haar) are statistically
+#      indistinguishable after Bonferroni, on both periods.
+#   2. The width null survives too: neither family degrades by more than
+#      0.15 sMAPE from w=512 to w=128, because the AE bottleneck (latent 32)
+#      is the binding constraint, not the trunk width in front of it.
+#   3. The AE row tracks the RootBlock row: the w=128 AE rung lands within
+#      0.2 sMAPE of the RootBlock row's width-128 rung on Yearly, i.e. the
+#      trunk *style* (flat vs bottlenecked) matters as little as its width.
+#
+# FALSIFIED IF: prediction 1 fails in either direction at 256 or 128 — a
+# family split that appears only under the AE trunk would mean basis identity
+# and trunk architecture interact, and the "structural, not wavelet"
+# restatement of the compression claim would need an AE carve-out.
+#
+# CONTROLS. Identical seeds, identical protocol, identical trend branch, one
+# block per stack, no weight sharing, ag0 throughout, latent_dim fixed at 32.
+# Only the second block type and its trunk width vary — exactly as in the
+# RootBlock row.
+#
+# COMMITMENT SOURCE: reviewer y8d1, Q2 (NeurIPS 2026 sub. 30981 rebuttal);
+# unrun-experiment list in NBEATS-Explorations/rebuttal/paper_rewrite_plan.md
+# Part I sect 10.
+#
+# Usage:
+#   python experiments/run_from_yaml.py experiments/configs/m4_2x2_ae_row.yaml
+# ============================================================
+
+experiment_name: m4_2x2_ae_row
+category: attribution
+description: >
+  AE row of the {Fourier, wavelet} x {RootBlock, AE} 2x2 crossing at a ~1M
+  parameter budget: Trend+SeasonalityAE vs Trend+WaveletV3AE(haar) at matched
+  trunk widths 512/256/128 with latent_dim 32, mirroring the RootBlock row in
+  m4_trunk_width_attribution.yaml.
+
+dataset: m4
+periods:
+  - Yearly
+  - Monthly
+
+protocol:
+  sampling_style: nbeats_paper
+  steps_per_epoch: 1000
+  sampling_weights: uniform
+  lh_multiplier:
+    Yearly: 10
+    Monthly: 10
+
+training:
+  active_g: false
+  sum_losses: false
+  activation: ReLU
+  max_steps: 100000
+  max_epochs: 150
+  patience: 15
+  val_check_interval: 100
+  min_delta: 0.001
+  n_blocks_per_stack: 1
+  share_weights: false
+  loss: SMAPELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  forecast_multiplier: 5
+  batch_size: 1024
+
+lr_scheduler:
+  type: multistep
+  n_milestones: 10
+  gamma: 0.5
+
+block_params:
+  t_width: 256              # trend branch pinned across every arm
+  trend_thetas_dim: 3
+  thetas_dim: 5
+  basis_dim: eq_fcast
+  latent_dim: 32            # AE bottleneck, fixed across both families
+  wavelet_type: haar        # only non-identity family at H=6 and H=18
+
+runs:
+  n_runs: 10
+  seed_mode: sequential
+  base_seed: 42
+
+extra_csv_columns:
+  - second_block
+  - trunk_width
+  - trunk_matched_pair
+
+configs:
+  # ---- Trend + SeasonalityAE (learned Fourier pair, AE trunk) ----
+  - name: T+SAE_10s_sw512_ld32
+    stacks: {type: alternating, blocks: [Trend, SeasonalityAE], repeats: 5}
+    block_params: {s_width: 512}
+    extra_fields: {second_block: SeasonalityAE, trunk_width: 512, trunk_matched_pair: w512}
+
+  - name: T+SAE_10s_sw256_ld32
+    stacks: {type: alternating, blocks: [Trend, SeasonalityAE], repeats: 5}
+    block_params: {s_width: 256}
+    extra_fields: {second_block: SeasonalityAE, trunk_width: 256, trunk_matched_pair: w256}
+
+  - name: T+SAE_10s_sw128_ld32
+    stacks: {type: alternating, blocks: [Trend, SeasonalityAE], repeats: 5}
+    block_params: {s_width: 128}
+    extra_fields: {second_block: SeasonalityAE, trunk_width: 128, trunk_matched_pair: w128}
+
+  # ---- Trend + WaveletV3AE haar (frozen orthonormal DWT, AE trunk) ----
+  - name: T+HaarV3AE_10s_gw512_ld32
+    stacks: {type: alternating, blocks: [Trend, WaveletV3AE], repeats: 5}
+    block_params: {g_width: 512}
+    extra_fields: {second_block: WaveletV3AE_haar, trunk_width: 512, trunk_matched_pair: w512}
+
+  - name: T+HaarV3AE_10s_gw256_ld32
+    stacks: {type: alternating, blocks: [Trend, WaveletV3AE], repeats: 5}
+    block_params: {g_width: 256}
+    extra_fields: {second_block: WaveletV3AE_haar, trunk_width: 256, trunk_matched_pair: w256}
+
+  - name: T+HaarV3AE_10s_gw128_ld32
+    stacks: {type: alternating, blocks: [Trend, WaveletV3AE], repeats: 5}
+    block_params: {g_width: 128}
+    extra_fields: {second_block: WaveletV3AE_haar, trunk_width: 128, trunk_matched_pair: w128}
+
+output:
+  results_dir: experiments/results
+  csv_filename: m4_2x2_ae_row_results.csv
+  save_predictions: false
+
+logging:
+  wandb:
+    enabled: false
+    project: nbeats-lightning
+  tensorboard: false
+
+hardware:
+  accelerator: auto
+  num_workers: 0
+
+analysis:
+  enabled: true
+  ranking: true

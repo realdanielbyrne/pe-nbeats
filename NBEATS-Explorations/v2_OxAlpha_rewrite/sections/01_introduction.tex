@@ -1,0 +1,160 @@
+% =========================================================================
+% Introduction fragment for "Frozen Basis Time Series Forecasting"
+% (camera-ready rewrite of NeurIPS submission 30981).
+% Thesis, scope conditions, and all statistics follow paper_rewrite_plan.md
+% §2/§16 and the five rebuttal responses; notation follows
+% notation_and_taxonomy_spec.md.
+% =========================================================================
+
+\section{Introduction}
+\label{sec:intro}
+
+Basis expansion made N-BEATS interpretable and accurate on M4
+\citep{oreshkin2020nbeats, makridakis2020m4}, and it spawned a family of
+architectures that wire fixed transforms --- most often wavelets
+\citep{mallat1989wavelet, daubechies1992ten} --- into deep forecasters, among
+them wavelet--N-BEATS pairings \citep{pramanick2024fusion}, multiresolution
+wavelet networks \citep{deznabi2023multiwave}, wavelet Transformers
+\citep{sasal2022wtransformers}, and wavelet-derivative schemes
+\citep{zhou2025wavets}. The natural reading of that literature, and the
+premise of this paper's submitted version, is that the choice of basis is
+where the accuracy lives. This paper started there and tested it. The tests
+overturned the premise, and the rewrite reports what replaced it.
+
+\subsection{Thesis}
+
+The rewritten claim is:
+
+\begin{quote}
+N-BEATS carries roughly fifty times more trunk capacity than its
+single-model accuracy requires. Replacing each block's unconstrained linear
+synthesis head with a frozen orthonormal basis makes the rank an explicit
+knob and removes the head's ability to emit values outside the target's
+range. Which basis fills that slot is provably irrelevant once it is
+complete. Two quantities computable before training --- captured energy and
+effective rank --- say how accurate a truncated basis will be and whether it
+will train at all.
+\end{quote}
+
+Everything that follows serves one of four load-bearing results.
+
+\subsection{Contributions}
+
+\begin{enumerate}
+\item \textbf{The trunk result.} Trunk width is inert across a 48.8-fold
+  parameter range: over 160 runs with ten seeds per rung on M4-Yearly and
+  M4-Monthly, the five rung means span 0.098 sMAPE against a within-rung
+  seed spread of 0.15--0.25 (Kruskal--Wallis $p = 0.776$ Yearly,
+  $p = 0.773$ Monthly), from $64{,}645{,}150$ parameters at width 2048 to
+  $1{,}323{,}550$ at width 128. The compression the submitted version
+  credited to the wavelet basis was one integer in a constructor: the
+  comparison had varied trunk width and basis together while naming only the
+  basis. The equivalence is bounded rather than merely unrejected.
+\item \textbf{The completeness result.} At complete forecast rank with
+  linear synthesis, two orthonormal bases differ by a rotation and the
+  freely learned projection absorbs that rotation exactly; we verify the
+  absorption numerically at residual $5.6\times 10^{-15}$ and measure it by
+  swapping Daubechies~3, a discrete cosine basis and random orthonormal
+  draws at identical parameter counts --- 36 paired comparisons over six
+  periods at ten seeds, none significant, minimum $p = 0.084$. Basis
+  identity cannot change what a complete block can synthesize.
+\item \textbf{Two pre-training predictors.} Where the basis is truncated,
+  captured energy orders trained accuracy exactly: on Traffic-96 five bases
+  at identical $3{,}532{,}800$ parameters fall in capture from 0.9714 to
+  0.3035 while sMAPE rises from 29.78 to 120.98 without a single inversion
+  (basis-level Spearman $-1.0$, exact $p = 0.017$, the floor attainable at
+  $n = 5$; run-level $\rho = -0.98$ over 25 runs, $p = 9.0\times 10^{-18}$).
+  Trainability is governed separately by effective rank (participation
+  ratio): bases concentrating their energy in one direction (1.05, 1.54)
+  fail on every seed under a plain linear head where diffuse bases (17.86,
+  17.12) never fail, and effective rank tracks convergence at
+  $\rho = +0.949$. Neither quantity is wavelet family.
+\item \textbf{A measured stability mechanism.} The model's rare divergence
+  is negative forecasts on positive series, which sMAPE scores at its
+  ceiling of 200 regardless of magnitude; deleting exactly those points
+  recovers converged scores to within 0.11 sMAPE. Rectifying the output
+  removes the mode by construction on non-negative targets (collapses 107 of
+  23,786 runs to 0 of 136), and pairing a trend branch repairs the
+  conditioning failure a low-effective-rank basis causes (DCT and
+  Karhunen--Lo\`eve arms from 0 of 10 seeds to 10 of 10, $p = 0.00018$),
+  though rectification destroys cancellation on sub-band designs.
+\item \textbf{Frontier positioning instead of accuracy claims, stated
+  against our own reruns.} The gain a compact frozen-basis configuration
+  buys is position on the accuracy-against-size curve
+  (Table~\ref{tab:sub1m_frontier}), not accuracy; on Traffic-96 the
+  baselines win outright and that loss is printed in the main table rather
+  than an appendix. All comparisons are single models under identical
+  protocol, schedule, seeds and codebase --- the published M4 figures are
+  ensembles and are never quoted beside them.
+\end{enumerate}
+
+\subsection{Scope conditions of the completeness result}
+
+The proposition that basis identity is inert at complete rank carries four
+scope conditions, stated here because every use of the result downstream
+respects them:
+
+\begin{enumerate}
+\item It fixes what the forecast head can \emph{represent}, not what
+  training \emph{finds}: expressiveness, not trainability. Trainability is
+  the separate effective-rank axis above.
+\item The paired trend branch is present in every arm of the identity grid;
+  the null is a trend-branch-present result, since the branch absorbs the
+  dominant component that otherwise breaks conditioning.
+\item It covers the forecast head only. The shipped backcast bases are
+  truncated to $H$ or $2H$ rows against a backcast of $3$--$5H$, so they
+  live in the truncated regime where families span different subspaces.
+\item Tiered configurations truncate the forecast basis as well and
+  therefore belong to the truncated regime, where the measurement, not the
+  proof, carries the equivalence.
+\end{enumerate}
+
+Below full rank the rotation lapses and identity matters before any training
+run: captured energy and effective rank take over, which is why the frozen
+basis earns its place in the title as method --- it makes rank an explicit
+knob, and the two predictive quantities exist only because it does.
+
+\subsection{Position on the parameter-efficiency frontier}
+
+Table~\ref{tab:sub1m_frontier} states the frontier claim once and precisely:
+for each period, the most accurate frozen-basis arm and the smallest arm
+within 0.05 sMAPE of its baseline. On the accuracy row not one significant
+loss appears on any M4 period, and the single significant difference favours
+the compact arm (Weekly, $-0.222$, $p = 0.038$); on the minimal row every
+period sits within 0.048 sMAPE of its baseline at 15 to 74 times fewer
+parameters. Compression and accuracy genuinely trade off --- Hourly buys
+parity at $2.4\times$ or $+0.165$ sMAPE at $51\times$ --- and the shape of
+that curve, not any single cell, is the result.
+
+\subsection{This paper corrects its own prior claims}
+
+The post-submission experiments contradicted claims the submitted version
+made, including claims no reviewer raised. Rather than let corrected numbers
+and uncorrected ones coexist, the rewrite carries every correction in a
+single ledger (Table~\ref{tab:corrections_ledger}): thirteen entries, nine
+of them unraised by reviewers, each stating the submitted claim and what
+replaced it. Two further self-disclosures function as standing prohibitions
+rather than corrections --- no \texttt{best\_val\_loss} comparison across
+\texttt{sum\_losses} settings is valid, and no metric comparison across
+normalization regimes is valid --- and no table or sentence in this paper
+makes either. Registered predictions that failed are reported as failures.
+
+\subsection{Withdrawal note: the Transformer study}
+
+The submitted version also reported transferring the blocks into Transformer
+language models, claiming that a Llama-3.2-1B variant with one bottlenecked
+MLP block beats its unmodified base on perplexity (18.81 vs.\ 19.45). We
+withdraw that claim and the entire Transformer/Llama material. The 19.45
+reference is the stock checkpoint evaluated zero-shot on data it never saw,
+while 18.81 follows three epochs of in-domain distillation: the comparison
+measures distillation, not architecture, and fine-tuning alone moves
+perplexity from 18.899 to roughly 15.4. The companion from-scratch figure of
+24.4 is a calibrated extrapolation sitting above its own 19.82 reference,
+no frozen-basis arm beat the dense baseline there (19.699 vs.\ 18.539), and
+the compute-matched distillation control and unstructured-bottleneck control
+were never run. This material leaves the paper entirely and becomes a
+separate study with its own controls; nothing else in this paper depends on
+it. The small scoped transfer study on the NHiTS backbone
+\citep{challu2023nhits} remains, and is reported with the same
+matched-budget discipline as everything else.
+

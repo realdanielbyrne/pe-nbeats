@@ -1,0 +1,113 @@
+% =========================================================================
+% Frozen Basis Time Series Forecasting
+% Camera-ready rewrite of NeurIPS 2026 submission 30981.
+%
+% Assembled per NBEATS-Explorations/rebuttal/paper_rewrite_plan.md (§13
+% execution order) with section/table fragments authored against
+% rebuttal/notation_and_taxonomy_spec.md.
+%
+% DECISION GATES (plan §13), decided explicitly:
+%   * Title: BARE form -- "Frozen Basis Time Series Forecasting"
+%     (subtitle option documented in sections/00_titlepage_abstract.tex).
+%   * Conclusion: INCLUDED (short form, sec:conclusion).
+%   * Practitioner recipe: MAIN TEXT with boxed quick-pick summary.
+%   * Plan §10 items 1-3 and 5 (AE row, taper sweep, weight-decay arm,
+%     Traffic trunk-width rerun): UNRUN -- disclosed plainly in text.
+%   * paper.md: archived as stale; not regenerated here (see REWRITE_NOTES.md).
+% =========================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{natbib}
+
+\geometry{
+  margin=1in
+}
+
+\makeatletter
+\@ifundefined{sloppypar}{\newenvironment{sloppypar}{\par\sloppy}{\par\fussy}}{}
+\makeatother
+
+\title{Frozen Basis Time Series Forecasting}
+
+\author{%
+  Daniel Byrne \\
+  \texttt{realdanielbyrne@icloud.com} \\
+}
+
+\begin{document}
+
+\maketitle
+
+% ------------------------- Front matter ---------------------------------
+\input{sections/00_titlepage_abstract}
+\input{sections/01_introduction}
+
+% Flagship tables referenced by the introduction.
+\input{tables/corrections_ledger}
+
+% ------------------------- Method ----------------------------------------
+\input{sections/02_unified_formulation}
+
+% Architecture tables referenced from the method/introduction.
+\input{tables/backbones}
+\input{tables/param-counts}
+
+% ------------------------- Evidence --------------------------------------
+\input{sections/03_trunk_result}
+\input{sections/04_completeness_result}
+\input{sections/05_predictors}
+
+% Parameter-efficiency frontier (referenced from intro + results).
+\input{tables/frontier}
+
+% ------------------------- Setup and results -----------------------------
+\input{sections/06_experimental_setup}
+\input{tables/datasets}
+\input{sections/06_results}
+\input{tables/main_leaderboard}
+
+% ------------------------- Recipe, related work, limitations --------------
+\input{sections/07_recipe_and_guidance}
+\input{tables/quickpick}
+\input{sections/08_related_work}
+\input{sections/09_limitations_conclusion}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+% ------------------------- Appendix ---------------------------------------
+\appendix
+
+\input{sections/A0_appendix_protocol}
+\input{sections/A1_appendix_hyperparameters}
+\input{sections/A2_appendix_configs}
+\input{sections/A3_appendix_ablations}
+\input{sections/A4_appendix_full_tables_intro}
+
+% Full per-period and out-of-distribution tables (referenced from A4).
+\input{tables/m4_yearly_full}
+\input{tables/m4_quarterly_full}
+\input{tables/m4_monthly_full}
+\input{tables/m4_weekly_full}
+\input{tables/m4_daily_full}
+\input{tables/m4_hourly_full}
+\input{tables/generalist_paper}
+\input{tables/generalist_sliding}
+\input{tables/tourism_winners}
+
+\end{document}

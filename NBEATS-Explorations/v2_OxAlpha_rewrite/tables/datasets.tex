@@ -1,0 +1,27 @@
+% =========================================================================
+% tab:datasets — spec §8 disposition #4: KEEP AS-IS, with the single
+% sanctioned correction from paper_rewrite_plan.md §12 loose ends /
+% §11 ledger context: M4-Monthly horizon is H = 18 (the v1 table printed
+% 24; 18 is correct and matches prose and every per-period table).
+% =========================================================================
+
+\begin{table}[h]
+  \caption{Datasets and evaluation parameters. The paper-sample protocol
+  enforces the in-sample constraint $L_h \cdot H$
+  \citep[Appendix~D]{oreshkin2020nbeats} on the trailing window of each
+  series, with $L_h = 1.5$ for Yearly/Quarterly and $L_h = 10$ otherwise.}
+  \label{tab:datasets}
+  \centering
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{llrlll}
+    \toprule
+    Dataset & Frequency & Series & Horizon $H$ & Lookback $L$ & Primary metric \\
+    \midrule
+    M4 (Y/Q/M/W/D/H) & mixed   & 100{,}000 & $\{6, 8, 18, 13, 14, 48\}$ & $L = 5H$        & sMAPE, OWA \\
+    Tourism (Y/Q/M)  & mixed   & 1{,}311   & $\{4, 8, 24\}$             & $L = 5H$        & sMAPE \\
+    Traffic-96       & hourly  & 862       & 96                         & $5H$            & MSE, MAE \\
+    Weather-96       & 10-min  & 21 ch.\   & 96                         & $5H$            & MSE, MAE \\
+    Milk             & monthly & 1         & 6                          & $5H$            & sMAPE \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
